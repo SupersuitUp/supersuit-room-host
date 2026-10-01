@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { writeFileSync, chmodSync, readdirSync, statSync, existsSync } from 'node:fs'
+import { writeFileSync, chmodSync, readdirSync, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -225,6 +225,7 @@ test('a version outside the range is held for a person, and the newest inside it
   assert.deepEqual(r.held, [{ name: MOD, range: '^1.2.0', available: '2.0.0' }])
   assert.equal(spec(c.template.work), '^1.3.0')
   assert.equal(locked(c.template.work), '1.3.0')
+  assert.equal(originMain(c.template.work), head(c.template.work))
 })
 
 test('under ^0.x a new minor is held, as npm itself reads the range', async (t) => {
@@ -270,6 +271,8 @@ test('--allow-major for one module leaves another module\'s held version held', 
   assert.deepEqual(r.taken, [{ name: MOD, from: '^0.1.2', to: '0.2.0' }])
   assert.deepEqual(r.held, [{ name: W, range: '^0.1.0', available: '0.2.0' }])
   assert.equal(spec(c.template.work, W), '^0.1.0')
+  assert.equal(spec(c.template.work), '^0.2.0')
+  assert.equal(originMain(c.template.work), head(c.template.work))
 })
 
 test('only declared modules move; one broken module never blocks another', async (t) => {
@@ -310,23 +313,24 @@ test('a module the registry cannot answer for is refused with a reason, and noth
 
 const hasPnpm = (() => { try { execFileSync('pnpm', ['--version'], { stdio: 'ignore' }); return true } catch { return false } })()
 
-// A listing of the real machine's npm and pnpm homes: each directory's own mtime plus its
-// immediate children's names and mtimes. Anything pnpm or npm wrote there would change it.
-function realHomes() {
+// Anything the fixture's pnpm run left in the real machine's pnpm homes: an entry whose path names
+// the fixture package or the throwaway registry. (Not a before/after listing: other sessions on
+// this machine write to ~/.npm and the pnpm homes all the time, so a snapshot compare flakes.)
+function leaksInRealPnpmHomes() {
   const h = homedir()
-  const dirs = ['.npm', '.cache/pnpm', '.local/share/pnpm', '.local/state/pnpm', '.pnpm-store', 'Library/pnpm', 'Library/Caches/pnpm']
-  const out = {}
-  for (const d of dirs) {
+  const found = []
+  // The content-addressed stores (Library/pnpm is gigabytes) are named by hash, so only the cache and
+  // state homes, where a registry host and package names appear in paths, are walked recursively.
+  for (const d of ['.cache/pnpm', '.local/state/pnpm', 'Library/Caches/pnpm']) {
     const p = join(h, d)
-    if (!existsSync(p)) { out[d] = null; continue }
-    out[d] = [statSync(p).mtimeMs, ...readdirSync(p).sort().map((n) => { try { return `${n}:${statSync(join(p, n)).mtimeMs}` } catch { return `${n}:gone` } })]
+    if (!existsSync(p)) continue
+    for (const e of readdirSync(p, { recursive: true })) if (/living-fixture|127\.0\.0\.1/.test(e)) found.push(join(d, e))
   }
-  return out
+  return found
 }
 const filesUnder = (dir) => (existsSync(dir) ? readdirSync(dir, { recursive: true }).length : 0)
 
 test('pnpm: the same bump rewrites pnpm-lock.yaml, the check gates it, and nothing lands outside the temp base', { skip: !hasPnpm && 'pnpm not installed' }, async (t) => {
-  const homesBefore = realHomes()
   const { c } = await family(t, { before: (r) => r.publish(MOD, '0.1.2'), after: (r) => r.publish(MOD, '0.1.3') }, { pm: 'pnpm' })
   assert.equal(c.lockfile, 'pnpm-lock.yaml')
   const r = await bump({ repo: c.template.work })
@@ -338,7 +342,7 @@ test('pnpm: the same bump rewrites pnpm-lock.yaml, the check gates it, and nothi
   // Isolation proof: pnpm really used the throwaway cache and store, and left the real ones alone.
   assert.ok(filesUnder(join(c.base, 'pnpm-store')) > 0, 'pnpm store is under the temp base')
   assert.ok(filesUnder(join(c.base, 'pnpm-cache')) > 0, 'pnpm metadata cache is under the temp base')
-  assert.deepEqual(realHomes(), homesBefore)
+  assert.deepEqual(leaksInRealPnpmHomes(), [])
 })
 
 test('pnpm: a version that fails the check is refused and nothing is published', { skip: !hasPnpm && 'pnpm not installed' }, async (t) => {
