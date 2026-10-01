@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { declaredModules, planModule, DEFAULT_MODULES } from '../modules.mjs'
+import { declaredModules, badModulePatterns, planModule, DEFAULT_MODULES } from '../modules.mjs'
 
 test('by default the @supersuit scope is a module, in any install field, never in peers', () => {
   assert.deepEqual(DEFAULT_MODULES, ['@supersuit/*'])
@@ -58,4 +58,17 @@ test('an unparseable declared range or junk in the version list never crashes th
   }
   assert.deepEqual(planModule('^1.2.0', ['garbage', '', '1.2.1', 'v1.3.x']), { take: { to: '1.2.1', spec: '^1.2.1' }, held: null, skip: null })
   assert.deepEqual(planModule('^1.2.0', undefined), { take: null, held: null, skip: null })
+})
+
+test('a non-string living.modules entry is skipped and reported, never thrown', () => {
+  const pkg = { living: { modules: [42, null, '@a/*', { x: 1 }] }, dependencies: { '@a/one': '^1.0.0', '@supersuit/x': '^1.0.0' } }
+  assert.deepEqual(declaredModules(pkg), [{ name: '@a/one', field: 'dependencies', spec: '^1.0.0' }])
+  assert.deepEqual(badModulePatterns(pkg), [42, null, { x: 1 }])
+  assert.deepEqual(badModulePatterns({}), [])
+})
+
+test('a v-prefixed registry version never yields a ^v range', () => {
+  assert.deepEqual(planModule('^1.2.0', ['1.2.0', 'v1.3.0']), { take: { to: '1.3.0', spec: '^1.3.0' }, held: null, skip: null })
+  assert.deepEqual(planModule('^1.2.0', ['v2.0.0']), { take: null, held: '2.0.0', skip: null })
+  assert.deepEqual(planModule('^1.2.0', ['v2.0.0'], { allowMajor: true }).take, { to: '2.0.0', spec: '^2.0.0' })
 })

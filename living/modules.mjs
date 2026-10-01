@@ -11,8 +11,12 @@ const FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies']
 
 const matches = (name, pattern) => (pattern.endsWith('/*') ? name.startsWith(pattern.slice(0, -1)) : name === pattern)
 
+// Entries of living.modules that are not strings cannot name a package: declaredModules skips
+// them, and this reports them so the bump can say so instead of throwing.
+export const badModulePatterns = (pkg) => (Array.isArray(pkg?.living?.modules) ? pkg.living.modules.filter((p) => typeof p !== 'string') : [])
+
 export function declaredModules(pkg) {
-  const patterns = Array.isArray(pkg?.living?.modules) ? pkg.living.modules : DEFAULT_MODULES
+  const patterns = Array.isArray(pkg?.living?.modules) ? pkg.living.modules.filter((p) => typeof p === 'string') : DEFAULT_MODULES
   const out = []
   for (const field of FIELDS) {
     for (const [name, spec] of Object.entries(pkg?.[field] ?? {})) {
@@ -30,7 +34,8 @@ export function declaredModules(pkg) {
 export function planModule(spec, versions, { allowMajor = false } = {}) {
   const range = parseRange(spec)
   if (!range || !isStable(range.base)) return { take: null, held: null, skip: 'unmanaged range' }
-  const stable = (Array.isArray(versions) ? versions : []).filter((v) => typeof v === 'string' && isStable(v))
+  // A registry may say v1.3.0; the range written into package.json must be ^1.3.0.
+  const stable = (Array.isArray(versions) ? versions : []).filter((v) => typeof v === 'string' && isStable(v)).map((v) => v.trim().replace(/^v/, ''))
   const newer = stable.filter((v) => compare(v, range.base) > 0).sort(compare)
   const best = newer.filter((v) => satisfies(range, v)).at(-1) ?? null
   const top = newer.filter((v) => !satisfies(range, v)).at(-1) ?? null
