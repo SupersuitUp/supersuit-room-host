@@ -32,8 +32,10 @@ living-template-template      this repository: the machinery, nothing else
   new pin to every app. A version outside the range (a major, or under `^0.x` a minor, as npm reads
   it) waits for a person: `node living/bump.mjs --repo <template> --allow-major <name>` takes it
   through the same check. Taken automatically: anything inside the range that passes the check.
-  Held: anything outside it, and anything that fails the check. A held version is told once, not
-  every night.
+  Held, and told once: anything outside it. Refused, and told once: anything that fails the
+  check (nothing is published; the report is `blocked`). Skipped, and told once: a module declared
+  with a range the bump does not move (`0.1.x`, `~1.2`, `*`, `workspace:*`, a tag) and a
+  `living.modules` entry that is not a package name; declare it as `^X.Y.Z` to have it moved.
 - **Below 1.0, an addition is a patch and a breaking change is a minor.** That is how a module's
   version has to be cut for the rule above to work: npm reads `^0.1.2` as "0.1.x only", so a
   breaking change shipped as a minor is held for a person, and an addition shipped as a patch
@@ -50,18 +52,24 @@ living-template-template      this repository: the machinery, nothing else
 | `node living/new-template.mjs <dir>` | A new living template from this repository. |
 | `node living/new-app.mjs <dir> --from <template> --template-checkout <path> --word <w>...` | A new tailored app from a template; fingerprints its private words into the template. |
 | `node living/nightly.mjs` | Update every registered repository on this machine, parents first. |
-| `node living/install-nightly.mjs <repo> [--template] [--notify "<cmd>"]` | Register a repository and install the 03:30 LaunchAgent (macOS). `--template` also bumps its modules each night; never use it for a tailored app. |
+| `node living/install-nightly.mjs <repo> [--template] [--register-only] [--notify "<cmd>" \| --no-notify] [--move-job]` | Register a repository and install the 03:30 LaunchAgent (macOS). `--template` also bumps its modules each night; never use it for a tailored app. `--register-only` edits the registry and leaves the job alone. Exit 2 is a refusal, with nothing changed. |
 
 `LIVING_NOTIFY_CMD` is a shell command that receives a report as JSON on stdin whenever a
-nightly run published something, was blocked, or has a newly held module version (module reports
-carry `"kind": "modules"`). A quiet night runs nothing, and the same held or refused version is
-told once.
+nightly run published something, was blocked, or has a newly held, refused or skipped module
+(module reports carry `"kind": "modules"`). A quiet night runs nothing, and the same held,
+refused or skipped module is told once.
 
-**Re-running `install-nightly.mjs` rewrites and reloads the live plist.** Unless you pass
-`--notify "<cmd>"` (or `LIVING_NOTIFY_CMD` is set in that shell), the plist loses its notify
-command and every blocked night goes untold. Pass the command already in the plist, under its
-`LIVING_NOTIFY_CMD` key. To register a template: `node living/install-nightly.mjs <template-repo>
---template --notify "<cmd>"`. Registering an app takes no `--template`.
+**Adding a repository to a machine whose job already runs: `--register-only`.** The job runs every
+registered repository, so a new one needs only the registry line:
+`node living/install-nightly.mjs <template-repo> --template --register-only`. The plist and the
+loaded job are not touched. Registering an app takes no `--template`.
+
+**A full re-run rewrites and reloads the plist, and keeps what the live one had.** With no
+`--notify` and no `LIVING_NOTIFY_CMD` in the shell, the notify command already in the plist is
+kept; removing it takes `--no-notify`, and an explicitly empty one is refused. The job stays on the
+copy of the framework it already runs, whichever copy you ran this from; `--move-job` moves it to
+this copy, and is required when the old copy no longer exists. A refusal exits 2 and changes
+nothing, the registry included.
 
 ## When an update or a bump is blocked
 

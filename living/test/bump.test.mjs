@@ -301,6 +301,16 @@ test('a range the bump does not manage is skipped and never touched', async (t) 
   assert.equal(originMain(c.template.work), before)
 })
 
+test('a living.modules entry that is not a package name is reported as skipped, never thrown', async () => {
+  const base = tmp('badpat')
+  try {
+    writeFileSync(join(base, 'package.json'), JSON.stringify({ name: 't', living: { modules: [42, '@supersuit/*'] } }))
+    const r = await bump({ repo: base, versionsOf: () => { throw new Error('never asked') } })
+    assert.equal(r.status, 'current')
+    assert.deepEqual(r.skipped, [{ name: '42', spec: null, reason: 'not a package name' }])
+  } finally { cleanup(base) }
+})
+
 test('a module the registry cannot answer for is refused with a reason, and nothing moves', async (t) => {
   const { c } = await family(t, { before: (r) => r.publish(MOD, '0.1.2') })
   const before = head(c.template.work)

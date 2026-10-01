@@ -37,7 +37,8 @@ Do this in order:
 6. **Give it its own remote and push:** `git remote add origin <new repo URL> && git push -u origin main`.
    Push the template checkout too, if step 2 committed fingerprints there.
 7. **Turn on updates:** `node living/install-nightly.mjs <folder>` on the machine that will own
-   it, with `--notify "<command that tells the owner>"` if they want to hear about updates.
+   it, with `--notify "<command that tells the owner>"` if they want to hear about updates. If
+   that machine already runs the nightly, add `--register-only` instead: the job is left alone.
 8. **Prove it in the real app**, signed in, on a phone if it is a phone app, before anyone else
    is told it exists. Then report: the address, what is in `tailor/`, and anything you had to
    change outside it.
