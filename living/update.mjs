@@ -2,7 +2,8 @@
 // The updater. Same job at every level of the family: is my parent (the `template` remote)
 // ahead of me? Then merge it in a throwaway worktree, keep my tailor/ and README, run my own
 // `living:check`, and publish only if every step passed. Anything that goes wrong publishes
-// nothing and says what blocked it; the checkout is never touched unless the result is green.
+// nothing and says what blocked it. The checkout itself moves only by fast-forward: to catch up
+// with origin when it is clean and behind, and to the merge once it is published.
 //
 //   node living/update.mjs [--repo <path>] [--dry-run] [--json]
 //   exit 0 updated / current / ahead (dry run), 2 blocked, 1 crashed
@@ -95,8 +96,12 @@ export async function update({ repo = process.cwd(), dryRun = false } = {}) {
 
     const push = tryGit(repo, 'push', '--quiet', 'origin', `${mergeSha}:refs/heads/${branch}`)
     if (!push.ok) return blocked('push failed', { output: push.err })
-    git(repo, 'merge', '--quiet', '--ff-only', mergeSha)
-    return { ...report, status: 'updated', divergent: divergence(repo, parentRef) }
+    // Published is published: origin has the merge and the children will take it. A checkout that
+    // cannot follow is a warning on the update; the next run sees "behind origin" and catches up.
+    // Divergence is then read from the worktree, whose HEAD is the published merge.
+    const ff = tryGit(repo, 'merge', '--quiet', '--ff-only', mergeSha)
+    const warning = ff.ok ? null : `published; local checkout did not fast-forward: ${ff.err || ff.out}`.slice(0, 1000)
+    return { ...report, status: 'updated', divergent: divergence(ff.ok ? repo : wt, parentRef), ...(warning ? { warning } : {}) }
   } finally {
     tryGit(repo, 'worktree', 'remove', '--force', wt)
     rmSync(wt, { recursive: true, force: true })
@@ -112,6 +117,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     else {
       console.log(`${r.repo}: ${r.status}${r.blockedBy ? ` (${r.blockedBy.reason})` : ''}`)
       for (const m of r.fastForwarded ?? []) console.log(`  caught up with origin: ${m}`)
+      if (r.warning) console.log(`  warning: ${r.warning}`)
       for (const m of r.merged) console.log(`  ${r.status === 'updated' ? 'merged' : 'pending'} ${m}`)
       for (const f of r.blockedBy?.files ?? []) console.log(`  blocked by ${f}`)
       for (const d of r.divergent) console.log(`  diverges: ${d.file}${d.parentChanges.length ? ` (parent since: ${d.parentChanges.join('; ')})` : ''}`)

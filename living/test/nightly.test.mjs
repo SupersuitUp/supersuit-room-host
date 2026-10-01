@@ -4,7 +4,7 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { orderParentsFirst, nightly, register } from '../nightly.mjs'
 import { plist } from '../install-nightly.mjs'
-import { makeChain, commit, sh, read, cleanup } from './helpers.mjs'
+import { makeChain, commit, sh, read, cleanup, failLocalFastForward } from './helpers.mjs'
 
 test('repositories run parents first, whatever order they were registered in', () => {
   const c = makeChain()
@@ -77,5 +77,20 @@ test('an update blocked because the checkout is ahead of origin is told, with it
     assert.deepEqual(reports.map((r) => r.status), ['current', 'blocked'])
     assert.deepEqual(told.map((r) => [r.repo, r.status, r.blockedBy?.reason]), [[c.app.work, 'blocked', 'ahead of origin']])
     assert.equal(sh(c.app.work, 'ls-remote', 'origin', 'main').includes(sh(c.app.work, 'rev-parse', 'HEAD')), false)
+  } finally { cleanup(c.base) }
+})
+
+test('an update that published but could not move the local checkout is told as updated, with the warning', async () => {
+  const c = makeChain()
+  try {
+    commit(c.template.work, { 'app.txt': 'v2\n' }, 'template: v2')
+    sh(c.template.work, 'push', '-q', 'origin', 'main')
+    failLocalFastForward(c.app.work)
+    const registry = join(c.base, 'repos.json')
+    writeFileSync(registry, JSON.stringify({ repos: [c.template.work, c.app.work] }))
+    const told = []
+    const reports = await nightly({ registry, notify: (r) => told.push(r) })
+    assert.deepEqual(reports.map((r) => r.status), ['current', 'updated'])
+    assert.deepEqual(told.map((r) => [r.status, r.merged.length, /did not fast-forward/.test(r.warning ?? '')]), [['updated', 1, true]])
   } finally { cleanup(c.base) }
 })

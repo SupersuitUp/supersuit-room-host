@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { update } from '../update.mjs'
-import { makeChain, commit, sh, read, head, originMain, cleanup, checkScript, tmp, makeRepo, metaFiles } from './helpers.mjs'
+import { makeChain, commit, sh, read, head, originMain, cleanup, checkScript, tmp, makeRepo, metaFiles, failLocalFastForward } from './helpers.mjs'
 
 test('parent ahead: merges, checks, publishes', async () => {
   const c = makeChain()
@@ -233,9 +233,11 @@ test('a dry run behind origin moves nothing and says so', async () => {
     templateV2(c)
     elsewhere(c)
     const before = head(c.app.work)
+    const published = originMain(c.app.work)
     const r = await update({ repo: c.app.work, dryRun: true })
     assert.equal(r.blockedBy?.reason, 'behind origin')
     assert.equal(head(c.app.work), before)
+    assert.equal(originMain(c.app.work), published)
   } finally { cleanup(c.base) }
 })
 
@@ -248,5 +250,23 @@ test('a dirty checkout names a modified tracked file by its whole path', async (
     writeFileSync(join(c.app.work, 'app.txt'), 'edited\n')
     const r = await update({ repo: c.app.work })
     assert.deepEqual(r.blockedBy, { reason: 'dirty', files: ['app.txt'] })
+  } finally { cleanup(c.base) }
+})
+
+// Published is published: once origin has the merge, the update is reported updated, whatever
+// happens to the local checkout afterwards (here a pre-push hook dirties the file the merge
+// changes, so the local fast-forward refuses). The next run sees "behind origin" and catches up.
+test('an update whose push landed but whose local fast-forward failed is reported updated, with a warning', async () => {
+  const c = makeChain()
+  try {
+    templateV2(c)
+    failLocalFastForward(c.app.work)
+    const r = await update({ repo: c.app.work })
+    assert.equal(r.status, 'updated', JSON.stringify(r))
+    assert.equal(r.blockedBy, null)
+    assert.equal(r.merged.length, 1)
+    assert.match(r.warning, /published; local checkout did not fast-forward/)
+    assert.equal(sh(c.app.work, 'show', 'origin/main:app.txt'), 'v2')
+    assert.equal(sh(c.app.work, 'log', '-1', '--format=%s', 'origin/main'), 'living: take 1 change from template (template: v2)')
   } finally { cleanup(c.base) }
 })

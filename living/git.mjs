@@ -40,14 +40,16 @@ export function changedFiles(dir) {
 // exactly as origin has it. Ahead would publish someone's unpushed commits along with ours; behind
 // or diverged would build on a stale tree; another branch would publish something that never
 // ships. Returns { branch } when in sync, else { blocked: reason } (plus output for a failed
-// fetch, and the default branch when the block is ahead, behind or diverged). It never changes anything but the remote-tracking refs a fetch updates; what to do
-// about a block is the caller's decision.
+// fetch, and the default branch when the block is ahead, behind or diverged). It never changes
+// anything but the remote-tracking refs a fetch updates; what to do about a block is the caller's
+// decision.
 export function inSyncWithOrigin(repo) {
   const branch = tryGit(repo, 'symbolic-ref', '--quiet', '--short', 'HEAD')
   if (!branch.ok) return { blocked: 'detached HEAD' }
   const fetched = tryGit(repo, 'fetch', '--quiet', 'origin')
   if (!fetched.ok) return { blocked: 'fetch failed', output: fetched.err }
   const sym = tryGit(repo, 'ls-remote', '--symref', 'origin', 'HEAD')
+  if (!sym.ok) return { blocked: 'fetch failed', output: sym.err }
   const def = /^ref: refs\/heads\/(\S+)\s+HEAD/m.exec(sym.out)?.[1]
   if (!def) return { blocked: 'no default branch on origin' }
   if (branch.out !== def) return { blocked: `not on ${def}` }
