@@ -42,7 +42,13 @@ nightly run published something or was blocked. A quiet night runs nothing.
 
 ## Making a tailored app
 
-See `living/KIT.md`: one prompt an agent follows end to end.
+**Someone making their own copy, on their own accounts:** clone the template, open it in Claude
+Code, and run `/generate` (`.claude/commands/generate.md`). It asks them what it needs, builds
+everything on their accounts following the template's `TAILORING.md`, and leaves the copy
+listening to the template.
+
+**The template's owner making a copy for someone:** `living/KIT.md`, which also fingerprints the
+new copy's private words into the template.
 
 ## Tests
 

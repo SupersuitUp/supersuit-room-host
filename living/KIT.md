@@ -1,7 +1,8 @@
 # The tailoring kit
 
 Paste this to an agent (Freeda, or any coding agent with a shell) to make a tailored app from a
-living template. Fill in the three lines at the top; the rest is the job.
+living template, as the template's owner. Someone making their own copy on their own accounts runs
+`/generate` in a clone of the template instead. Fill in the three lines at the top; the rest is the job.
 
 ---
 
