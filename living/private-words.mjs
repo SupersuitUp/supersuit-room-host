@@ -45,7 +45,14 @@ function candidates(line) {
   for (let i = 0; i < words.length; i++) {
     for (let n = 1; n <= MAX_PHRASE && i + n <= words.length; n++) out.add(words.slice(i, i + n).join(' '))
   }
-  for (const m of line.matchAll(/[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/gu)) out.add(m[0].toLowerCase())
+  // Names joined by hyphens or underscores (a project id like acme-c92b7), whole.
+  for (const m of line.matchAll(/[\p{L}\p{N}]+(?:[-_][\p{L}\p{N}]+)+/gu)) out.add(m[0].toLowerCase())
+  // Dotted names (domains), whole and every ending, so a forbidden example.org is caught
+  // inside us.example.org.
+  for (const m of line.matchAll(/[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/gu)) {
+    const parts = m[0].toLowerCase().split('.')
+    for (let i = 0; i < parts.length - 1; i++) out.add(parts.slice(i).join('.'))
+  }
   return out
 }
 

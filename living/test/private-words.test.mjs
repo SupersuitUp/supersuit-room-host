@@ -73,6 +73,17 @@ test('a new file nobody has committed yet is scanned too, and an ignored one is 
   } finally { cleanup(base) }
 })
 
+test('a hyphenated name and the end of a longer domain are caught', () => {
+  const { base, work } = repoWith({
+    'tailor/forbidden.sha256': [fingerprint('acme-c92b7'), fingerprint('example.org')].join('\n') + '\n',
+    'next.config.ts': "destination: 'https://acme-c92b7.firebaseapp.com/__/auth'\n",
+    'src/site.ts': "const SITE = 'https://us.example.org'\n",
+  })
+  try {
+    assert.deepEqual(scan(work).map((h) => h.file).sort(), ['next.config.ts', 'src/site.ts'])
+  } finally { cleanup(base) }
+})
+
 test('a word that merely contains a forbidden word is not a hit', () => {
   const { base, work } = repoWith({
     'tailor/forbidden.sha256': fingerprint('ben') + '\n',
