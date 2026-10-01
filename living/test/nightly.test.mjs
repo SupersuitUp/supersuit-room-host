@@ -276,3 +276,30 @@ test('the CLI writes last-run.json beside the registry it was given, never in th
     assert.equal(existsSync(join(home, '.living-template')), false)
   } finally { cleanup(base) }
 })
+
+// A bad told-once memo must never stop the updates: it is set aside, said once, and rewritten.
+test('a garbage seen file still updates every repository, is warned about once, and is rewritten valid', async () => {
+  const c = makeChain()
+  try {
+    const registry = join(c.base, 'repos.json')
+    const seenFile = join(c.base, 'modules-seen.json')
+    writeFileSync(registry, JSON.stringify({ repos: [c.app.work, c.template.work], templates: [c.template.work] }))
+    const held = async ({ repo }) => modulesReport(repo, { status: 'held', held: [{ name: '@supersuit/x', range: '^1.0.0', available: '2.0.0' }] })
+    for (const garbage of ['{"half": ', '[1, 2]', 'null']) {
+      writeFileSync(seenFile, garbage)
+      const warned = []
+      const told = []
+      const reports = await nightly({ registry, bumpModules: held, notify: (r) => told.push(r), warn: (m) => warned.push(m) })
+      assert.deepEqual(reports.map((r) => [r.repo, r.kind ?? 'update']), [[c.template.work, 'update'], [c.template.work, 'modules'], [c.app.work, 'update']], garbage)
+      assert.equal(warned.length, 1, garbage)
+      assert.match(warned[0], /modules-seen\.json/)
+      assert.deepEqual(told.map((r) => r.kind), ['modules'], garbage)
+      assert.deepEqual(JSON.parse(readFileSync(seenFile, 'utf8'))[c.template.work].held, { '@supersuit/x': '2.0.0' })
+      assert.equal(existsSync(seenFile + '.tmp'), false)
+      const quiet = []
+      await nightly({ registry, bumpModules: held, notify: (r) => quiet.push(r), warn: (m) => warned.push(m) })
+      assert.equal(quiet.length, 0, garbage)
+      assert.equal(warned.length, 1, garbage)
+    }
+  } finally { cleanup(c.base) }
+})

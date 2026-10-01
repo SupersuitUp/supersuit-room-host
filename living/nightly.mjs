@@ -10,7 +10,7 @@
 //   registry: ~/.living-template/repos.json, { "repos": ["/abs/path", ...], "templates": [...] }
 //   beside the registry: last-run.json and modules-seen.json
 //   LIVING_NOTIFY_CMD: a shell command given each report worth telling as JSON on stdin
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -81,9 +81,32 @@ export function freshNews(m, prev = {}) {
   return { ...news, status: statusOf(news) }
 }
 
-export async function nightly({ registry = REGISTRY, notify = null, bumpModules = bump, seenFile = join(dirname(registry), 'modules-seen.json') } = {}) {
+// The told-once memo is only a memo: one that cannot be read must never stop the updates. It is
+// set aside (at worst a held version is told one more time), said once in the run's output, and
+// rewritten whole at the end of the run.
+function readSeen(file, warn) {
+  let seen
+  try { seen = readJson(file) } catch (e) {
+    warn(`${file} could not be read (${e.message}); starting it again, so a held version may be told once more`)
+    return {}
+  }
+  if (seen && typeof seen === 'object' && !Array.isArray(seen)) return seen
+  warn(`${file} is not an object; starting it again, so a held version may be told once more`)
+  return {}
+}
+
+// Written beside itself and renamed into place, so a run killed mid-write, or a second run reading
+// while this one writes, never sees half a file.
+function writeAtomic(file, body) {
+  mkdirSync(dirname(file), { recursive: true })
+  const tmpFile = `${file}.tmp`
+  writeFileSync(tmpFile, body)
+  renameSync(tmpFile, file)
+}
+
+export async function nightly({ registry = REGISTRY, notify = null, bumpModules = bump, seenFile = join(dirname(registry), 'modules-seen.json'), warn = (m) => console.error(m) } = {}) {
   const templates = new Set(readTemplates(registry).map((p) => resolve(p)))
-  const seen = templates.size ? readJson(seenFile) : {}
+  const seen = templates.size ? readSeen(seenFile, warn) : {}
   const reports = []
   for (const repo of orderParentsFirst(readRegistry(registry))) {
     let r
@@ -112,10 +135,7 @@ export async function nightly({ registry = REGISTRY, notify = null, bumpModules 
     seen[m.repo] = remember(m, seen[m.repo])
     if (notify && news) await notify(news)
   }
-  if (templates.size) {
-    mkdirSync(dirname(seenFile), { recursive: true })
-    writeFileSync(seenFile, JSON.stringify(seen, null, 2) + '\n')
-  }
+  if (templates.size) writeAtomic(seenFile, JSON.stringify(seen, null, 2) + '\n')
   return reports
 }
 
