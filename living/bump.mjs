@@ -58,9 +58,10 @@ export async function bump({ repo = process.cwd(), dryRun = false, allowMajor = 
   if (!packageManager(repo).lockfile) { report.blockedBy = { reason: 'no lockfile' }; return done() }
   const dirty = changedFiles(repo)
   if (dirty.length) { report.blockedBy = { reason: 'dirty', files: dirty }; return done() }
-  const branch = git(repo, 'rev-parse', '--abbrev-ref', 'HEAD')
-  if (branch === 'HEAD') { report.blockedBy = { reason: 'detached HEAD' }; return done() }
-  tryGit(repo, 'fetch', '--quiet', 'origin')
+  tryGit(repo, 'worktree', 'prune') // a take killed mid-flight left a registered worktree behind
+  const sync = inSyncWithOrigin(repo)
+  if (sync.blocked) { report.blockedBy = { reason: sync.blocked }; return done() }
+  const { branch } = sync
 
   for (const m of modules) {
     let versions
@@ -75,10 +76,32 @@ export async function bump({ repo = process.cwd(), dryRun = false, allowMajor = 
     if (dryRun) { report.taken.push({ name: m.name, from: m.spec, to: plan.take.to }); continue }
     let r
     try { r = takeOne(repo, branch, m, plan.take) } catch (e) { r = { ok: false, reason: 'crashed', output: e.message } }
-    if (r.ok) report.taken.push({ name: m.name, from: m.spec, to: plan.take.to })
+    if (r.ok) report.taken.push({ name: m.name, from: m.spec, to: plan.take.to, ...(r.warning ? { warning: r.warning } : {}) })
     else report.refused.push({ name: m.name, to: plan.take.to, reason: r.reason, output: r.output ?? '', ...(r.files ? { files: r.files } : {}) })
   }
   return done()
+}
+
+// A take is published to origin's default branch, so the checkout must BE that branch, exactly as
+// origin has it. Ahead would publish someone's unpushed commits along with the bump; behind or
+// diverged would cut the take from a stale package.json; another branch would bump something that
+// never ships. Each is blocked and reported, never resolved here.
+function inSyncWithOrigin(repo) {
+  const branch = tryGit(repo, 'symbolic-ref', '--quiet', '--short', 'HEAD')
+  if (!branch.ok) return { blocked: 'detached HEAD' }
+  if (!tryGit(repo, 'fetch', '--quiet', 'origin').ok) return { blocked: 'fetch failed' }
+  const sym = tryGit(repo, 'ls-remote', '--symref', 'origin', 'HEAD')
+  const def = /^ref: refs\/heads\/(\S+)\s+HEAD/m.exec(sym.out)?.[1]
+  if (!def) return { blocked: 'no default branch on origin' }
+  if (branch.out !== def) return { blocked: `not on ${def}` }
+  const local = git(repo, 'rev-parse', 'HEAD')
+  const remote = tryGit(repo, 'rev-parse', '--verify', '--quiet', `refs/remotes/origin/${def}`)
+  if (!remote.ok) return { blocked: `no origin/${def}` }
+  if (local === remote.out) return { branch: def }
+  const isAncestor = (a, b) => tryGit(repo, 'merge-base', '--is-ancestor', a, b).ok
+  if (isAncestor(local, remote.out)) return { blocked: 'behind origin' }
+  if (isAncestor(remote.out, local)) return { blocked: 'ahead of origin' }
+  return { blocked: 'diverged from origin' }
 }
 
 // One module, one throwaway worktree: raise the range, let the package manager rewrite the
@@ -88,7 +111,8 @@ export async function bump({ repo = process.cwd(), dryRun = false, allowMajor = 
 function takeOne(repo, branch, m, take) {
   const wt = mkdtempSync(join(tmpdir(), 'living-bump-'))
   rmSync(wt, { recursive: true, force: true })
-  git(repo, 'worktree', 'add', '--quiet', '--detach', wt, 'HEAD')
+  // Cut from origin, never from local HEAD (equal at the start; after a take, both moved together).
+  git(repo, 'worktree', 'add', '--quiet', '--detach', wt, `refs/remotes/origin/${branch}`)
   try {
     const file = join(wt, 'package.json')
     const text = readFileSync(file, 'utf8')
@@ -113,7 +137,10 @@ function takeOne(repo, branch, m, take) {
     if (!check.ok) return { ok: false, reason: check.reason, output: check.output }
     const push = tryGit(repo, 'push', '--quiet', 'origin', `${sha}:refs/heads/${branch}`)
     if (!push.ok) return { ok: false, reason: 'push failed', output: push.err }
-    git(repo, 'merge', '--quiet', '--ff-only', sha)
+    // Published is published: origin has it and apps will take it. A checkout that cannot follow
+    // is a warning on the take, and the next run reports it as behind origin rather than retrying.
+    const ff = tryGit(repo, 'merge', '--quiet', '--ff-only', sha)
+    if (!ff.ok) return { ok: true, warning: `published; local checkout not fast-forwarded: ${ff.err || ff.out}`.slice(0, 1000) }
     return { ok: true }
   } finally {
     tryGit(repo, 'worktree', 'remove', '--force', wt)
@@ -135,7 +162,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     if (args.includes('--json')) console.log(JSON.stringify(r, null, 2))
     else {
       console.log(`${r.repo}: modules ${r.status}${r.blockedBy ? ` (${r.blockedBy.reason})` : ''}`)
-      for (const x of r.taken) console.log(`  ${r.status === 'ahead' ? 'would take' : 'took'} ${x.name} ${x.to} (was ${x.from})`)
+      for (const x of r.taken) console.log(`  ${r.status === 'ahead' ? 'would take' : 'took'} ${x.name} ${x.to} (was ${x.from})${x.warning ? `; ${x.warning}` : ''}`)
       for (const x of r.refused) console.log(`  refused ${x.name} ${x.to ?? ''}: ${x.reason}`)
       for (const x of r.held) console.log(`  held ${x.name} ${x.available}: outside ${x.range}; take it with --allow-major ${x.name}`)
       for (const x of r.skipped) console.log(`  skipped ${x.name} ${x.spec}: ${x.reason}`)
