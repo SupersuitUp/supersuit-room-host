@@ -38,7 +38,9 @@ From now on `template` is where improvements come from, and `origin` will be the
 ## 2. Ask them what only they know
 
 Use `AskUserQuestion`, a few questions at a time, never a wall of prose. Ask for exactly what
-`TAILORING.md` lists under "What you need before you start", and nothing it does not. Do not guess
+`TAILORING.md` lists under "What you need before you start", and nothing it does not. **Never ask
+for a secret in the chat** (an API key, a password, a private key): the transcript keeps it. A
+secret goes from them straight into the hosting provider's own prompt, at the step that needs it. Do not guess
 a name, an address or an account. Where `TAILORING.md` offers a default, offer it as the
 recommended option.
 
@@ -49,9 +51,11 @@ name**, and never on the account of whoever made the template.
 ## 3. Their private words
 
 Write `tailor/private-words.txt`: one per line, their full names, any distinctive single name or
-surname, their email domain if it is personal, and the app's address once it is known. **A first
-name that is also an ordinary word (Will, Grace, Hope, May) goes in only as the full name**: the
-check matches whole words, so a bare "Will" would flag every "will" in the code.
+surname, their email domain if it is personal, and the app's address once it is known. **Three
+kinds of name go in only as the full name, never alone:** a first name that is also an ordinary
+word (Will, Grace, Hope, May), a name the template's sample couple uses (see `tailor/README.md`),
+and the short member keys. The check matches whole words, so a bare "Will" would flag every
+"will" in the code, and a bare sample name flags every test.
 
 ```bash
 node living/private-words.mjs     # must say: no private words outside tailor/
@@ -60,11 +64,14 @@ node living/private-words.mjs     # must say: no private words outside tailor/
 ## 4. Rewrite tailor/
 
 Follow `tailor/README.md` field by field. The sample values are placeholders; every one of them
-gets replaced or deliberately kept. Change nothing outside `tailor/`.
+gets replaced or deliberately kept. Values that only exist once their accounts do (an API key, an
+app id, the final address) stay as placeholders until step 5 fills them, and step 6 refuses any
+that are left. Change nothing outside `tailor/`.
 
 ## 5. Their infrastructure
 
-Follow `TAILORING.md` section by section, on their accounts:
+Follow `TAILORING.md`'s setup sections in order (every section before "Prove it"), on their
+accounts. Publishing, going live and updates are steps 7 to 9 here, not there:
 
 - Run every command yourself. Before the first one for a service, check they are signed in to the
   right account (`firebase login:list`, `gcloud config get account`, `vercel whoami`, `gh auth status`)
@@ -94,7 +101,7 @@ git push -u origin main
 
 ## 8. Live
 
-Deploy as `TAILORING.md` says, then prove it the way its last section says, on a phone if it is a
+Deploy as `TAILORING.md` says, then prove it as its "Prove it" section says, on a phone if it is a
 phone app. Delete anything you created to test it.
 
 ## 9. Updates every night

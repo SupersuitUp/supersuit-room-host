@@ -18,7 +18,15 @@ test('every living/ file /generate names exists in the meta-template', () => {
   for (const f of named) assert.ok(existsSync(join(ROOT, f)), `${f} is named by /generate but missing`)
 })
 
+test('/generate never asks for a secret in the chat, and stops the template\'s setup at "Prove it"', () => {
+  const body = readFileSync(CMD, 'utf8')
+  assert.match(body, /Never ask\s+for a secret in the chat/)
+  assert.match(body, /every section before "Prove it"/)
+})
+
 test('/generate relies on a template section every template must have', () => {
   // A template's own tests check its TAILORING.md has this heading (us-template: tailoring.test.ts).
-  assert.match(readFileSync(CMD, 'utf8'), /"What you need before you start"/)
+  const body = readFileSync(CMD, 'utf8')
+  assert.match(body, /"What you need before you start"/)
+  assert.match(body, /"Prove it"/)
 })

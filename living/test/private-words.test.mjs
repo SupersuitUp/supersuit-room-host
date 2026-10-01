@@ -31,8 +31,8 @@ test('a fingerprinted domain is a hit', () => {
 
 test('a plain phrase listed in private-words.txt is a hit', () => {
   const { base, work } = repoWith({
-    'tailor/private-words.txt': 'Ana Lovelace\n',
-    'docs/x.md': 'written by ana  lovelace\n\nnothing here\n',
+    'tailor/private-words.txt': 'Quillon Marbrook\n',
+    'docs/x.md': 'written by quillon  marbrook\n\nnothing here\n',
   })
   try {
     assert.deepEqual(scan(work).map((h) => [h.file, h.line]), [['docs/x.md', 1]])
