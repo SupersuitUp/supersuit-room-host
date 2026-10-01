@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { scan, fingerprint, addForbidden } from '../private-words.mjs'
-import { tmp, makeRepo, commit, read, cleanup } from './helpers.mjs'
+import { tmp, makeRepo, commit, read, cleanup, write } from './helpers.mjs'
 
 const repoWith = (files) => {
   const base = tmp('words')
@@ -59,6 +59,17 @@ test('a copy may name itself in its own README, but never someone the template f
   })
   try {
     assert.deepEqual(scan(work).map((h) => [h.file, h.line]), [['README.md', 2]])
+  } finally { cleanup(base) }
+})
+
+test('a new file nobody has committed yet is scanned too, and an ignored one is not', () => {
+  const { base, work } = repoWith({
+    'tailor/forbidden.sha256': fingerprint('zebulon') + '\n',
+    '.gitignore': 'build/\n',
+  })
+  try {
+    write(work, { 'src/new.js': 'const who = "Zebulon"\n', 'build/out.js': 'zebulon\n' })
+    assert.deepEqual(scan(work).map((h) => h.file), ['src/new.js'])
   } finally { cleanup(base) }
 })
 

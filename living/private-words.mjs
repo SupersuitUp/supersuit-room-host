@@ -2,6 +2,8 @@
 // The private-words check. Fails a repository when a real person's name, address or domain
 // appears in any tracked file outside tailor/.
 //
+// Scans every file git would commit: tracked, plus new files not ignored.
+//
 // Two lists, both in tailor/:
 //   forbidden.sha256   one SHA-256 per line, of a word or phrase lowercased. A TEMPLATE forbids
 //                      its apps' names this way, so it can refuse them without containing them.
@@ -53,7 +55,10 @@ export function scan(repo = process.cwd()) {
   const own = new Set(readList(repo, PLAIN).map(fingerprint))
   if (forbidden.size + own.size === 0) return []
   const hits = []
-  for (const file of lines(git(repo, 'ls-files'))) {
+  // Tracked files AND new ones not yet committed (but not ignored ones): the check runs before
+  // the commit that would add a leak, so reading only what git already tracks would pass a
+  // brand-new template that has not committed its app yet. That happened, on us-template.
+  for (const file of lines(git(repo, 'ls-files', '--cached', '--others', '--exclude-standard'))) {
     if (file.startsWith('tailor/')) continue
     // README.md belongs to the copy (it is kept on every update), so the copy may name itself
     // there; a name the template forbids is still refused.
