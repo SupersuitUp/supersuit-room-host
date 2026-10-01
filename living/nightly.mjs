@@ -59,15 +59,20 @@ export function orderParentsFirst(repos) {
 }
 
 // What one repository's module report adds to what was already told. A taken version is always
-// news; a held or refused version, or a block, only the first night it appears.
+// news; a held, refused or skipped module, or a block, only the first night it appears.
 // A blocked report returned before any module was looked at, so its empty held and refused
 // lists say nothing: the previous ones are carried forward, or the night it recovers would
 // tell the same held version again.
+// A skipped module (declared with a range the bump does not move, or a living.modules entry that
+// is not a package name) is told once per declaration: changing the declaration tells it again.
+const skipKey = (s) => `${s.spec ?? null}|${s.reason}`
+
 export function remember(m, prev = {}) {
-  if (m.blockedBy) return { held: { ...prev.held }, refused: { ...prev.refused }, blocked: m.blockedBy.reason }
+  if (m.blockedBy) return { held: { ...prev.held }, refused: { ...prev.refused }, skipped: { ...prev.skipped }, blocked: m.blockedBy.reason }
   return {
     held: Object.fromEntries(m.held.map((h) => [h.name, h.available])),
     refused: Object.fromEntries(m.refused.map((f) => [f.name, f.to ?? f.reason])),
+    skipped: Object.fromEntries((m.skipped ?? []).map((s) => [s.name, skipKey(s)])),
     blocked: null,
   }
 }
@@ -75,9 +80,10 @@ export function remember(m, prev = {}) {
 export function freshNews(m, prev = {}) {
   const held = m.held.filter((h) => prev.held?.[h.name] !== h.available)
   const refused = m.refused.filter((f) => prev.refused?.[f.name] !== (f.to ?? f.reason))
+  const skipped = (m.skipped ?? []).filter((s) => prev.skipped?.[s.name] !== skipKey(s))
   const blockedBy = m.blockedBy && prev.blocked !== m.blockedBy.reason ? m.blockedBy : null
-  if (!m.taken.length && !held.length && !refused.length && !blockedBy) return null
-  const news = { ...m, held, refused, blockedBy }
+  if (!m.taken.length && !held.length && !refused.length && !skipped.length && !blockedBy) return null
+  const news = { ...m, held, refused, skipped, blockedBy }
   return { ...news, status: statusOf(news) }
 }
 

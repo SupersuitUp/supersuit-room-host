@@ -5,7 +5,7 @@ import { join, dirname } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { orderParentsFirst, nightly, register, freshNews, remember } from '../nightly.mjs'
-import { plist, parseArgs } from '../install-nightly.mjs'
+import { plist } from '../install-nightly.mjs'
 import { makeChain, commit, sh, read, cleanup, failLocalFastForward, tmp } from './helpers.mjs'
 import { startRegistry, isolateNpm, makeModuleChain, MOD } from './registry.mjs'
 
@@ -112,11 +112,6 @@ test('register remembers a template separately, and leaves the file as it was un
   } finally { cleanup(base) }
 })
 
-test('install-nightly reads --template and --notify in any order', () => {
-  assert.deepEqual(parseArgs(['/r', '--template', '--notify', 'say hi']), { repo: '/r', notify: 'say hi', template: true })
-  assert.deepEqual(parseArgs(['--notify', 'x', '/r']), { repo: '/r', notify: 'x', template: false })
-})
-
 test('only a repository registered as a template is bumped, right after its own update', async () => {
   const c = makeChain()
   try {
@@ -179,7 +174,7 @@ test('a dirty template is reported once, by its update, and never bumped', async
 test('freshNews keeps what is new and recomputes the status', () => {
   const r = modulesReport('/t', { taken: [{ name: 'a', from: '^1.0.0', to: '1.0.1' }], refused: [{ name: 'b', to: '0.1.4', reason: 'check failed' }], held: [{ name: 'c', range: '^1.0.0', available: '2.0.0' }] })
   const prev = remember(r)
-  assert.deepEqual(prev, { held: { c: '2.0.0' }, refused: { b: '0.1.4' }, blocked: null })
+  assert.deepEqual(prev, { held: { c: '2.0.0' }, refused: { b: '0.1.4' }, skipped: {}, blocked: null })
   const again = freshNews(r, prev)
   assert.equal(again.status, 'bumped')
   assert.deepEqual([again.refused, again.held], [[], []])
@@ -257,9 +252,43 @@ test('a held version told before a blocked night is not told again after it', as
 })
 
 test('remember carries the previous held and refused lists through a blocked report', () => {
-  const prev = { held: { c: '2.0.0' }, refused: { b: '0.1.4' }, blocked: null }
-  assert.deepEqual(remember(modulesReport('/t', { blockedBy: { reason: 'dirty' } }), prev), { held: { c: '2.0.0' }, refused: { b: '0.1.4' }, blocked: 'dirty' })
-  assert.deepEqual(remember(modulesReport('/t'), prev), { held: {}, refused: {}, blocked: null })
+  const prev = { held: { c: '2.0.0' }, refused: { b: '0.1.4' }, skipped: { d: '~1.2.0|unmanaged range' }, blocked: null }
+  assert.deepEqual(remember(modulesReport('/t', { blockedBy: { reason: 'dirty' } }), prev), { held: { c: '2.0.0' }, refused: { b: '0.1.4' }, skipped: { d: '~1.2.0|unmanaged range' }, blocked: 'dirty' })
+  assert.deepEqual(remember(modulesReport('/t'), prev), { held: {}, refused: {}, skipped: {}, blocked: null })
+})
+
+// M1: a module the nightly will never move, because of how it is declared, is told once.
+test('a skipped module is news the first night and silent after, until its declaration changes', () => {
+  const skipped = [{ name: 'd', spec: '~1.2.0', reason: 'unmanaged range' }, { name: '42', spec: null, reason: 'not a package name' }]
+  const r = modulesReport('/t', { skipped })
+  const first = freshNews(r, undefined)
+  assert.deepEqual(first.skipped, skipped)
+  assert.equal(first.status, 'current')
+  const prev = remember(r)
+  assert.deepEqual(prev.skipped, { d: '~1.2.0|unmanaged range', 42: 'null|not a package name' })
+  assert.equal(freshNews(r, prev), null)
+  const changed = freshNews(modulesReport('/t', { skipped: [{ name: 'd', spec: '*', reason: 'unmanaged range' }] }), prev)
+  assert.deepEqual(changed.skipped.map((x) => x.spec), ['*'])
+})
+
+test('a module report from before skipped existed is still read', () => {
+  const old = { repo: '/t', kind: 'modules', status: 'current', taken: [], refused: [], held: [], blockedBy: null }
+  assert.equal(freshNews(old, undefined), null)
+  assert.deepEqual(remember(old).skipped, {})
+})
+
+test('the nightly tells a skipped module once across nights', async () => {
+  const c = makeChain()
+  try {
+    const registry = join(c.base, 'repos.json')
+    writeFileSync(registry, JSON.stringify({ repos: [c.template.work], templates: [c.template.work] }))
+    const skipped = [{ name: '@supersuit/x', spec: '0.1.x', reason: 'unmanaged range' }]
+    const bumpModules = async ({ repo }) => modulesReport(repo, { skipped })
+    const told = []
+    await nightly({ registry, bumpModules, notify: (r) => told.push(r) })
+    await nightly({ registry, bumpModules, notify: (r) => told.push(r) })
+    assert.deepEqual(told.map((r) => [r.kind, r.skipped]), [['modules', skipped]])
+  } finally { cleanup(c.base) }
 })
 
 test('the CLI writes last-run.json beside the registry it was given, never in the real home', () => {

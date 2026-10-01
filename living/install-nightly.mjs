@@ -1,13 +1,21 @@
 #!/usr/bin/env node
 // Register a living repository on this machine and make sure the one nightly job exists.
-// macOS only (a LaunchAgent at 03:30 local time). The job runs THIS copy of nightly.mjs,
-// which is itself kept current by the nightly update of the repository it lives in.
+// macOS only (a LaunchAgent at 03:30 local time). The job runs nightly.mjs from the copy of the
+// framework it was first installed from, which is itself kept current by the nightly update of
+// the repository it lives in.
 //
-//   node living/install-nightly.mjs <repo> [--template] [--notify "<shell command>"]
-//   LIVING_NOTIFY_CMD in the environment is used when --notify is not given.
-//   --template registers the repository as a TEMPLATE, so the nightly run also bumps its modules
-//   (living/bump.mjs); never use it for a tailored app.
-import { writeFileSync, mkdirSync } from 'node:fs'
+//   node living/install-nightly.mjs <repo> [--template] [--register-only]
+//                                   [--notify "<shell command>" | --no-notify] [--move-job]
+//   --template       registers the repository as a TEMPLATE, so the nightly run also bumps its
+//                    modules (living/bump.mjs); never use it for a tailored app.
+//   --register-only  edits the registry only; the plist and the loaded job are not touched. The
+//                    job already runs every registered repository, so this is all a new one needs.
+//   notify           --notify, else LIVING_NOTIFY_CMD in the environment, else the command already
+//                    in the live plist is kept. Removing it takes --no-notify; nothing drops it silently.
+//   --move-job       run the job from THIS copy of the framework. Without it a re-run keeps the job
+//                    on the copy it already runs, and refuses if that copy no longer exists.
+//   exit 0 done, 1 usage or launchctl failed, 2 refused (nothing written)
+import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -50,32 +58,108 @@ ${env.map(([k, v]) => `    <key>${k}</key>\n    <string>${esc(v)}</string>`).joi
 `
 }
 
-export function parseArgs(argv) {
+const FLAGS = ['--template', '--register-only', '--no-notify', '--move-job']
+
+export function parseArgs(argv, env = process.env) {
   const args = [...argv]
   const i = args.indexOf('--notify')
-  const notify = i >= 0 ? args.splice(i, 2)[1] : process.env.LIVING_NOTIFY_CMD
-  const t = args.indexOf('--template')
-  const template = t >= 0
-  if (template) args.splice(t, 1)
-  return { repo: args[0], notify, template }
+  const notify = i >= 0 ? args.splice(i, 2)[1] : env.LIVING_NOTIFY_CMD
+  const has = Object.fromEntries(FLAGS.map((f) => {
+    const at = args.indexOf(f)
+    if (at >= 0) args.splice(at, 1)
+    return [f, at >= 0]
+  }))
+  return { repo: args[0], notify, template: has['--template'], registerOnly: has['--register-only'], noNotify: has['--no-notify'], moveJob: has['--move-job'] }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const { repo, notify, template } = parseArgs(process.argv.slice(2))
-  if (!repo) { console.error('usage: install-nightly.mjs <repo> [--template] [--notify "<cmd>"]'); process.exit(1) }
-  const repos = register(repo, REGISTRY, { template })
-  mkdirSync(HOME, { recursive: true })
-  const file = join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`)
-  writeFileSync(file, plist({
-    node: process.execPath,
-    script: join(dirname(fileURLToPath(import.meta.url)), 'nightly.mjs'),
-    path: [dirname(process.execPath), join(homedir(), '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'].join(':'),
-    notify,
-    log: join(HOME, 'nightly.log'),
-  }))
+const unesc = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&')
+
+// The live job as this file writes it: the script it runs and the notify command it carries.
+// null when the text is not a job plist this can read.
+export function readJob(xml) {
+  const args = /<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(xml ?? '')
+  if (!args) return null
+  const strings = [...args[1].matchAll(/<string>([\s\S]*?)<\/string>/g)].map((m) => unesc(m[1]))
+  const env = /<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/.exec(xml)?.[1] ?? ''
+  const notify = /<key>LIVING_NOTIFY_CMD<\/key>\s*<string>([\s\S]*?)<\/string>/.exec(env)?.[1]
+  return { script: strings[1] ?? null, notify: notify === undefined ? null : unesc(notify) }
+}
+
+// What the job should be after this run, from the live one: never drop notify without
+// --no-notify, never move the job to another copy of the framework without --move-job.
+// existing: readJob of the live plist, null when there is none; unreadable: a plist exists that
+// readJob could not read. Returns { notify, script, notes } or { error }.
+export function planJob({ existing, unreadable = false, notify, noNotify = false, moveJob = false, script, exists = existsSync }) {
+  if (noNotify && notify) return { error: 'both --notify and --no-notify were given; pass one' }
+  if (unreadable && !(moveJob && (noNotify || notify))) {
+    return { error: 'cannot read the live plist, so its notify command and script are unknown; pass --move-job and --notify "<cmd>" (or --no-notify) to replace it, or --register-only to leave it' }
+  }
+  const notes = []
+  const next = noNotify ? null : notify !== undefined ? notify : existing?.notify ?? null
+  if (!next && existing?.notify && !noNotify) {
+    return { error: `the live job tells "${existing.notify}" about blocked nights and this run would remove it; pass --no-notify to remove it on purpose, or --notify "<cmd>" to change it` }
+  }
+  let target = script
+  if (existing?.script && existing.script !== script && !moveJob) {
+    if (!exists(existing.script)) {
+      return { error: `the live job runs ${existing.script}, which no longer exists; pass --move-job to run ${script} instead` }
+    }
+    target = existing.script
+    notes.push(`the job stays on ${existing.script}; pass --move-job to run ${script} instead`)
+  }
+  return { notify: next, script: target, notes }
+}
+
+export const PLIST = join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`)
+const THIS_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), 'nightly.mjs')
+
+function loadJob(file) {
   const domain = `gui/${process.getuid()}`
   spawnSync('launchctl', ['bootout', `${domain}/${LABEL}`])
   const r = spawnSync('launchctl', ['bootstrap', domain, file], { encoding: 'utf8' })
-  if (r.status !== 0) { console.error(`launchctl bootstrap failed: ${r.stderr}`); process.exit(1) }
-  console.log(`registered ${repos.length} repo(s) in ${REGISTRY}${template ? `; ${repo} as a template` : ''}; nightly job ${LABEL} loaded (03:30)`)
+  return r.status === 0 ? { ok: true } : { ok: false, err: r.stderr }
+}
+
+// Everything the command does, with every path injectable so tests use throwaway files only.
+// Refusals are decided before anything is written: a refused run leaves the registry, the plist
+// and the job exactly as they were.
+export function install({ argv, env = process.env, registry = REGISTRY, plistFile = PLIST, script = THIS_SCRIPT, load = loadJob, exists = existsSync, node = process.execPath, log = join(HOME, 'nightly.log') }) {
+  const a = parseArgs(argv, env)
+  const out = []
+  if (!a.repo) return { code: 1, out, err: 'usage: install-nightly.mjs <repo> [--template] [--register-only] [--notify "<cmd>" | --no-notify] [--move-job]' }
+  if (a.registerOnly) {
+    const repos = register(a.repo, registry, { template: a.template })
+    out.push(`registered ${repos.length} repo(s) in ${registry}${a.template ? `; ${a.repo} as a template` : ''}; the nightly job was not touched`)
+    return { code: 0, out }
+  }
+  let existing = null
+  let unreadable = false
+  if (existsSync(plistFile)) {
+    existing = readJob(readFileSync(plistFile, 'utf8'))
+    unreadable = existing === null
+  }
+  const plan = planJob({ existing, unreadable, notify: a.notify, noNotify: a.noNotify, moveJob: a.moveJob, script, exists })
+  if (plan.error) return { code: 2, out, err: `refused, nothing changed: ${plan.error}` }
+  const repos = register(a.repo, registry, { template: a.template })
+  mkdirSync(dirname(log), { recursive: true })
+  mkdirSync(dirname(plistFile), { recursive: true })
+  writeFileSync(plistFile, plist({
+    node,
+    script: plan.script,
+    path: [dirname(node), join(homedir(), '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'].join(':'),
+    notify: plan.notify,
+    log,
+  }))
+  const r = load(plistFile)
+  if (!r.ok) return { code: 1, out, err: `launchctl bootstrap failed: ${r.err}` }
+  out.push(...plan.notes)
+  out.push(`registered ${repos.length} repo(s) in ${registry}${a.template ? `; ${a.repo} as a template` : ''}; nightly job ${LABEL} loaded (03:30) running ${plan.script}${plan.notify ? '' : ', with NO notify command'}`)
+  return { code: 0, out }
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  const r = install({ argv: process.argv.slice(2) })
+  for (const line of r.out) console.log(line)
+  if (r.err) console.error(r.err)
+  process.exit(r.code)
 }

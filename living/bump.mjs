@@ -16,7 +16,7 @@ import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { git, tryGit, changedFiles, inSyncWithOrigin } from './git.mjs'
 import { packageManager, runCheck, run } from './check.mjs'
-import { declaredModules, planModule } from './modules.mjs'
+import { declaredModules, badModulePatterns, planModule } from './modules.mjs'
 
 export function npmVersions(name, cwd) {
   const r = spawnSync('npm', ['view', name, 'versions', '--json'], { cwd, encoding: 'utf8', env: process.env })
@@ -38,7 +38,10 @@ export async function bump({ repo = process.cwd(), dryRun = false, allowMajor = 
 
   const pkgPath = join(repo, 'package.json')
   if (!existsSync(pkgPath)) return done()
-  const modules = declaredModules(JSON.parse(readFileSync(pkgPath, 'utf8')))
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
+  // An entry of living.modules that is not a string cannot name a package; say so, never throw.
+  for (const p of badModulePatterns(pkg)) report.skipped.push({ name: JSON.stringify(p) ?? String(p), spec: null, reason: 'not a package name' })
+  const modules = declaredModules(pkg)
   if (!modules.length) return done()
   if (!packageManager(repo).lockfile) { report.blockedBy = { reason: 'no lockfile' }; return done() }
   const dirty = changedFiles(repo)
@@ -128,7 +131,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
       for (const x of r.taken) console.log(`  ${r.status === 'ahead' ? 'would take' : 'took'} ${x.name} ${x.to} (was ${x.from})${x.warning ? `; ${x.warning}` : ''}`)
       for (const x of r.refused) console.log(`  refused ${x.name} ${x.to ?? ''}: ${x.reason}`)
       for (const x of r.held) console.log(`  held ${x.name} ${x.available}: outside ${x.range}; take it with --allow-major ${x.name}`)
-      for (const x of r.skipped) console.log(`  skipped ${x.name} ${x.spec}: ${x.reason}`)
+      for (const x of r.skipped) console.log(`  skipped ${x.name}${x.spec ? ` ${x.spec}` : ''}: ${x.reason}`)
       for (const f of r.blockedBy?.files ?? []) console.log(`  blocked by ${f}`)
     }
     process.exit(r.status === 'blocked' ? 2 : 0)
