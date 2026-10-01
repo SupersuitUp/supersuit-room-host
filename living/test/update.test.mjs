@@ -15,6 +15,7 @@ test('parent ahead: merges, checks, publishes', async () => {
     assert.ok(r.merged.some((m) => m.startsWith(sha.slice(0, 7))))
     assert.equal(read(c.app.work, 'app.txt'), 'template app v2\n')
     assert.equal(originMain(c.app.work), head(c.app.work))
+    assert.equal(sh(c.app.work, 'log', '-1', '--format=%s'), 'living: take 1 change from template (template: v2)')
   } finally { cleanup(c.base) }
 })
 

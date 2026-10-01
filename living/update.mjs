@@ -70,7 +70,11 @@ export async function update({ repo = process.cwd(), dryRun = false } = {}) {
       tryGit(wt, 'merge', '--abort')
       return blocked('conflict', { files: conflicts })
     }
-    git(wt, 'commit', '--quiet', '--no-edit')
+    const name = (report.parent.split('/').pop() ?? 'template').replace(/\.git$/, '')
+    const n = report.merged.length
+    const subjects = report.merged.map((m) => m.slice(m.indexOf(' ') + 1))
+    const shown = subjects.slice(0, 3).join('; ') + (n > 3 ? `; and ${n - 3} more` : '')
+    git(wt, 'commit', '--quiet', '-m', `living: take ${n} change${n === 1 ? '' : 's'} from ${name} (${shown})`)
     const mergeSha = git(wt, 'rev-parse', 'HEAD')
 
     const check = runCheck(wt)
