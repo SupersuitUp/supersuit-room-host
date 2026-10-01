@@ -1,7 +1,7 @@
 // Throwaway repositories for the living/ tests. Every test builds its own family of repos
 // under the OS temp folder: a bare "origin" for each level (what GitHub is in real life) and a
 // working clone that the updater runs in.
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -102,3 +102,12 @@ export const cleanup = (base) => rmSync(base, { recursive: true, force: true })
 export const head = (repo, ref = 'HEAD') => sh(repo, 'rev-parse', ref)
 export const originMain = (repo) => { sh(repo, 'fetch', '-q', 'origin'); return head(repo, 'origin/main') }
 export { ENV }
+
+// A pre-push hook that dirties app.txt in the checkout, so the push lands and the local
+// fast-forward that follows it refuses. Absolute hooksPath: a relative one resolves per worktree.
+export function failLocalFastForward(repo) {
+  sh(repo, 'config', 'core.hooksPath', join(repo, '.git', 'hooks'))
+  const file = join(repo, '.git', 'hooks', 'pre-push')
+  writeFileSync(file, '#!/bin/sh\nprintf "edited by someone\\n" > app.txt\n')
+  chmodSync(file, 0o755)
+}

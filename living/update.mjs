@@ -2,17 +2,18 @@
 // The updater. Same job at every level of the family: is my parent (the `template` remote)
 // ahead of me? Then merge it in a throwaway worktree, keep my tailor/ and README, run my own
 // `living:check`, and publish only if every step passed. Anything that goes wrong publishes
-// nothing and says what blocked it; the checkout is never touched unless the result is green.
+// nothing and says what blocked it. The checkout itself moves only by fast-forward: to catch up
+// with origin when it is clean and behind, and to the merge once it is published.
 //
 //   node living/update.mjs [--repo <path>] [--dry-run] [--json]
 //   exit 0 updated / current / ahead (dry run), 2 blocked, 1 crashed
-import { existsSync, readFileSync, mkdtempSync, rmSync, unlinkSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
-import { git, tryGit, lines, isKept } from './git.mjs'
+import { git, tryGit, lines, isKept, changedFiles, inSyncWithOrigin } from './git.mjs'
 import { divergence } from './divergence.mjs'
+import { runCheck } from './check.mjs'
 
 const PARENT = 'template'
 
@@ -25,14 +26,27 @@ export async function update({ repo = process.cwd(), dryRun = false } = {}) {
   if (!parentUrl.ok) return blocked('no template remote')
   report.parent = parentUrl.out
 
-  const dirty = git(repo, 'status', '--porcelain')
-  if (dirty) return blocked('dirty', { files: lines(dirty).map((l) => l.slice(3)) })
+  const dirty = changedFiles(repo)
+  if (dirty.length) return blocked('dirty', { files: dirty })
 
   const fetched = tryGit(repo, 'fetch', '--quiet', PARENT)
   if (!fetched.ok) return blocked('fetch failed', { output: fetched.err })
-  tryGit(repo, 'fetch', '--quiet', 'origin')
 
-  const branch = git(repo, 'rev-parse', '--abbrev-ref', 'HEAD')
+  // Publish only from a checkout that is exactly origin's default branch. Behind is the one block
+  // an update resolves itself: the tree is clean (checked above) and no local commit exists, so a
+  // fast-forward to what origin already published loses nothing, which is all `git pull` does.
+  // Ahead, diverged, another branch, detached or unfetchable are reported and nothing is pushed.
+  let sync = inSyncWithOrigin(repo)
+  if (sync.blocked === 'behind origin' && !dryRun) {
+    const upstream = `refs/remotes/origin/${sync.branch}`
+    const pulled = lines(git(repo, 'log', '--format=%h %s', `HEAD..${upstream}`))
+    const ff = tryGit(repo, 'merge', '--quiet', '--ff-only', upstream)
+    if (!ff.ok) return blocked('behind origin', { output: ff.err || ff.out })
+    report.fastForwarded = pulled
+    sync = inSyncWithOrigin(repo)
+  }
+  if (sync.blocked) return blocked(sync.blocked, sync.output ? { output: sync.output } : {})
+  const { branch } = sync
   const parentRef = `${PARENT}/main`
   report.merged = lines(git(repo, 'log', '--format=%h %s', `HEAD..${parentRef}`))
   if (report.merged.length === 0) return { ...report, divergent: divergence(repo, parentRef) }
@@ -40,7 +54,7 @@ export async function update({ repo = process.cwd(), dryRun = false } = {}) {
 
   const wt = mkdtempSync(join(tmpdir(), 'living-update-'))
   rmSync(wt, { recursive: true, force: true })
-  git(repo, 'worktree', 'add', '--quiet', '--detach', wt, 'HEAD')
+  git(repo, 'worktree', 'add', '--quiet', '--detach', wt, `refs/remotes/origin/${branch}`)
   try {
     git(wt, 'config', 'merge.ours.driver', 'true')
     const merge = tryGit(wt, 'merge', '--no-commit', '--no-ff', parentRef)
@@ -80,35 +94,18 @@ export async function update({ repo = process.cwd(), dryRun = false } = {}) {
     const check = runCheck(wt)
     if (!check.ok) return blocked(check.reason, { output: check.output })
 
-    const push = tryGit(repo, 'push', '--quiet', 'origin', `${mergeSha}:${branch}`)
+    const push = tryGit(repo, 'push', '--quiet', 'origin', `${mergeSha}:refs/heads/${branch}`)
     if (!push.ok) return blocked('push failed', { output: push.err })
-    git(repo, 'merge', '--quiet', '--ff-only', mergeSha)
-    return { ...report, status: 'updated', divergent: divergence(repo, parentRef) }
+    // Published is published: origin has the merge and the children will take it. A checkout that
+    // cannot follow is a warning on the update; the next run sees "behind origin" and catches up.
+    // Divergence is then read from the worktree, whose HEAD is the published merge.
+    const ff = tryGit(repo, 'merge', '--quiet', '--ff-only', mergeSha)
+    const warning = ff.ok ? null : `published; local checkout did not fast-forward: ${ff.err || ff.out}`.slice(0, 1000)
+    return { ...report, status: 'updated', divergent: divergence(ff.ok ? repo : wt, parentRef), ...(warning ? { warning } : {}) }
   } finally {
     tryGit(repo, 'worktree', 'remove', '--force', wt)
     rmSync(wt, { recursive: true, force: true })
   }
-}
-
-// The repository's own check, which the repository defines and the meta-template never does.
-function runCheck(dir) {
-  const pkgPath = join(dir, 'package.json')
-  const pkg = existsSync(pkgPath) ? JSON.parse(readFileSync(pkgPath, 'utf8')) : null
-  if (!pkg?.scripts?.['living:check']) return { ok: false, reason: 'no living:check script', output: '' }
-  const pm = existsSync(join(dir, 'pnpm-lock.yaml')) ? 'pnpm' : 'npm'
-  const install = pm === 'pnpm' ? ['install', '--frozen-lockfile'] : existsSync(join(dir, 'package-lock.json')) ? ['ci'] : null
-  if (install) {
-    const r = run(pm, install, dir)
-    if (!r.ok) return { ok: false, reason: 'install failed', output: r.output }
-  }
-  const r = run(pm, ['run', 'living:check'], dir)
-  return r.ok ? { ok: true } : { ok: false, reason: 'check failed', output: r.output }
-}
-
-function run(cmd, args, cwd) {
-  const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, env: { ...process.env, CI: '1' } })
-  const output = `${r.stdout ?? ''}${r.stderr ?? ''}`.slice(-4000)
-  return { ok: r.status === 0, output }
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
@@ -119,6 +116,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     if (args.includes('--json')) console.log(JSON.stringify(r, null, 2))
     else {
       console.log(`${r.repo}: ${r.status}${r.blockedBy ? ` (${r.blockedBy.reason})` : ''}`)
+      for (const m of r.fastForwarded ?? []) console.log(`  caught up with origin: ${m}`)
+      if (r.warning) console.log(`  warning: ${r.warning}`)
       for (const m of r.merged) console.log(`  ${r.status === 'updated' ? 'merged' : 'pending'} ${m}`)
       for (const f of r.blockedBy?.files ?? []) console.log(`  blocked by ${f}`)
       for (const d of r.divergent) console.log(`  diverges: ${d.file}${d.parentChanges.length ? ` (parent since: ${d.parentChanges.join('; ')})` : ''}`)
