@@ -1,0 +1,5 @@
+# Whatever makes a copy someone's own lives in tailor/. An update from the parent never
+# overwrites it, at any level. Every child rewrites README.md, so the parent's never wins either.
+# The `ours` driver is declared by living/update.mjs before every merge.
+tailor/** merge=ours
+README.md merge=ours
