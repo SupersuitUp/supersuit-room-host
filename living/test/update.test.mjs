@@ -134,3 +134,119 @@ test('dry run reports what would merge and publishes nothing', async () => {
     assert.equal(head(c.app.work), before)
   } finally { cleanup(c.base) }
 })
+
+// An update publishes to origin's default branch, so the checkout must be that branch exactly as
+// origin has it. Anything else is blocked and reported; nothing is pushed.
+const templateV2 = (c) => { commit(c.template.work, { 'app.txt': 'v2\n' }, 'template: v2'); sh(c.template.work, 'push', '-q', 'origin', 'main') }
+const elsewhere = (c) => {
+  const other = join(c.base, 'other')
+  sh(c.base, 'clone', '-q', c.app.bare, other)
+  const sha = commit(other, { 'notes.txt': 'from elsewhere\n' }, 'elsewhere: a change')
+  sh(other, 'push', '-q', 'origin', 'main')
+  return sha
+}
+
+test('a checkout ahead of origin is blocked and its unpushed commit is never published', async () => {
+  const c = makeChain()
+  try {
+    templateV2(c)
+    const before = originMain(c.app.work)
+    commit(c.app.work, { 'wip.txt': 'not reviewed yet\n' }, 'someone else: work in progress')
+    const r = await update({ repo: c.app.work })
+    assert.equal(r.status, 'blocked')
+    assert.equal(r.blockedBy.reason, 'ahead of origin')
+    assert.equal(originMain(c.app.work), before)
+    assert.equal(read(c.app.work, 'app.txt'), 'template app\n')
+  } finally { cleanup(c.base) }
+})
+
+test('a checkout diverged from origin is blocked and nothing is published', async () => {
+  const c = makeChain()
+  try {
+    templateV2(c)
+    const moved = elsewhere(c)
+    commit(c.app.work, { 'wip.txt': 'local\n' }, 'local: unpushed')
+    const r = await update({ repo: c.app.work })
+    assert.equal(r.blockedBy?.reason, 'diverged from origin')
+    assert.equal(originMain(c.app.work), moved)
+  } finally { cleanup(c.base) }
+})
+
+test('a checkout on another branch is blocked, and neither branch moves', async () => {
+  const c = makeChain()
+  try {
+    templateV2(c)
+    const before = originMain(c.app.work)
+    sh(c.app.work, 'checkout', '-q', '-b', 'feature')
+    const r = await update({ repo: c.app.work })
+    assert.equal(r.blockedBy?.reason, 'not on main')
+    assert.equal(originMain(c.app.work), before)
+    assert.equal(sh(c.app.work, 'ls-remote', '--heads', 'origin', 'feature'), '')
+  } finally { cleanup(c.base) }
+})
+
+test('a detached checkout is blocked and nothing is published', async () => {
+  const c = makeChain()
+  try {
+    templateV2(c)
+    const before = originMain(c.app.work)
+    sh(c.app.work, 'checkout', '-q', '--detach')
+    const r = await update({ repo: c.app.work })
+    assert.equal(r.blockedBy?.reason, 'detached HEAD')
+    assert.equal(originMain(c.app.work), before)
+  } finally { cleanup(c.base) }
+})
+
+test('a checkout whose origin cannot be fetched is blocked and nothing is published', async () => {
+  const c = makeChain()
+  try {
+    templateV2(c)
+    const before = head(c.app.work)
+    sh(c.app.work, 'remote', 'set-url', 'origin', join(c.base, 'no-such-origin.git'))
+    const r = await update({ repo: c.app.work })
+    assert.equal(r.status, 'blocked')
+    assert.equal(r.blockedBy.reason, 'fetch failed')
+    assert.equal(head(c.app.work), before)
+  } finally { cleanup(c.base) }
+})
+
+// Behind with a clean tree and no local commits is exactly what `git pull --ff-only` exists for:
+// the checkout catches up to what origin already published, then the update runs as usual.
+test('a clean checkout behind origin is fast-forwarded first, then updated on top', async () => {
+  const c = makeChain()
+  try {
+    templateV2(c)
+    const moved = elsewhere(c)
+    const r = await update({ repo: c.app.work })
+    assert.equal(r.status, 'updated', JSON.stringify(r))
+    assert.deepEqual(r.fastForwarded, [`${moved.slice(0, 7)} elsewhere: a change`])
+    assert.equal(originMain(c.app.work), head(c.app.work))
+    assert.equal(sh(c.app.work, 'merge-base', '--is-ancestor', moved, 'HEAD'), '')
+    assert.equal(read(c.app.work, 'notes.txt'), 'from elsewhere\n')
+    assert.equal(read(c.app.work, 'app.txt'), 'v2\n')
+  } finally { cleanup(c.base) }
+})
+
+test('a dry run behind origin moves nothing and says so', async () => {
+  const c = makeChain()
+  try {
+    templateV2(c)
+    elsewhere(c)
+    const before = head(c.app.work)
+    const r = await update({ repo: c.app.work, dryRun: true })
+    assert.equal(r.blockedBy?.reason, 'behind origin')
+    assert.equal(head(c.app.work), before)
+  } finally { cleanup(c.base) }
+})
+
+// git's porcelain marks a modified tracked file " M path"; trimmed, slicing three characters
+// reported "pp.txt".
+test('a dirty checkout names a modified tracked file by its whole path', async () => {
+  const c = makeChain()
+  try {
+    templateV2(c)
+    writeFileSync(join(c.app.work, 'app.txt'), 'edited\n')
+    const r = await update({ repo: c.app.work })
+    assert.deepEqual(r.blockedBy, { reason: 'dirty', files: ['app.txt'] })
+  } finally { cleanup(c.base) }
+})

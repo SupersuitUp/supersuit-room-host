@@ -62,3 +62,20 @@ test('the LaunchAgent escapes XML in the notify command', () => {
   const xml = plist({ node: 'n', script: 's', path: 'p', notify: 'a && b < c', log: 'l' })
   assert.match(xml, /a &amp;&amp; b &lt; c/)
 })
+
+// A block is told the same way a dirty tree is: the report carries the reason, notify gets it.
+test('an update blocked because the checkout is ahead of origin is told, with its reason', async () => {
+  const c = makeChain()
+  try {
+    commit(c.template.work, { 'app.txt': 'v2\n' }, 'template: v2')
+    sh(c.template.work, 'push', '-q', 'origin', 'main')
+    commit(c.app.work, { 'wip.txt': 'unpushed\n' }, 'someone else: work in progress')
+    const registry = join(c.base, 'repos.json')
+    writeFileSync(registry, JSON.stringify({ repos: [c.template.work, c.app.work] }))
+    const told = []
+    const reports = await nightly({ registry, notify: (r) => told.push(r) })
+    assert.deepEqual(reports.map((r) => r.status), ['current', 'blocked'])
+    assert.deepEqual(told.map((r) => [r.repo, r.status, r.blockedBy?.reason]), [[c.app.work, 'blocked', 'ahead of origin']])
+    assert.equal(sh(c.app.work, 'ls-remote', 'origin', 'main').includes(sh(c.app.work, 'rev-parse', 'HEAD')), false)
+  } finally { cleanup(c.base) }
+})

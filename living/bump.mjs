@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
-import { git, tryGit } from './git.mjs'
+import { git, tryGit, changedFiles, inSyncWithOrigin } from './git.mjs'
 import { packageManager, runCheck, run } from './check.mjs'
 import { declaredModules, planModule } from './modules.mjs'
 
@@ -31,21 +31,6 @@ export function statusOf(r, dryRun = false) {
   return r.held.length ? 'held' : 'current'
 }
 
-// Every path git status reports as changed or untracked. Not through git(): git() trims its
-// output, and porcelain's " M path" loses its leading column when trimmed, so slicing three
-// characters off would report "ackage.json".
-function changedFiles(dir) {
-  const r = spawnSync('git', ['status', '--porcelain', '-z', '--untracked-files=all'], { cwd: dir, encoding: 'utf8' })
-  if (r.status !== 0) throw new Error(`git status failed in ${dir}: ${(r.stderr ?? '').trim()}`)
-  const out = []
-  const parts = r.stdout.split('\0').filter(Boolean)
-  for (let i = 0; i < parts.length; i++) {
-    out.push(parts[i].slice(3))
-    if (/^[RC]/.test(parts[i])) i++ // a rename or copy carries its source path as the next entry
-  }
-  return out
-}
-
 export async function bump({ repo = process.cwd(), dryRun = false, allowMajor = [], versionsOf = npmVersions } = {}) {
   repo = resolve(repo)
   const report = { repo, kind: 'modules', status: 'current', taken: [], refused: [], held: [], skipped: [], blockedBy: null }
@@ -60,7 +45,7 @@ export async function bump({ repo = process.cwd(), dryRun = false, allowMajor = 
   if (dirty.length) { report.blockedBy = { reason: 'dirty', files: dirty }; return done() }
   tryGit(repo, 'worktree', 'prune') // a take killed mid-flight left a registered worktree behind
   const sync = inSyncWithOrigin(repo)
-  if (sync.blocked) { report.blockedBy = { reason: sync.blocked }; return done() }
+  if (sync.blocked) { report.blockedBy = { reason: sync.blocked, ...(sync.output ? { output: sync.output } : {}) }; return done() }
   const { branch } = sync
 
   for (const m of modules) {
@@ -80,28 +65,6 @@ export async function bump({ repo = process.cwd(), dryRun = false, allowMajor = 
     else report.refused.push({ name: m.name, to: plan.take.to, reason: r.reason, output: r.output ?? '', ...(r.files ? { files: r.files } : {}) })
   }
   return done()
-}
-
-// A take is published to origin's default branch, so the checkout must BE that branch, exactly as
-// origin has it. Ahead would publish someone's unpushed commits along with the bump; behind or
-// diverged would cut the take from a stale package.json; another branch would bump something that
-// never ships. Each is blocked and reported, never resolved here.
-function inSyncWithOrigin(repo) {
-  const branch = tryGit(repo, 'symbolic-ref', '--quiet', '--short', 'HEAD')
-  if (!branch.ok) return { blocked: 'detached HEAD' }
-  if (!tryGit(repo, 'fetch', '--quiet', 'origin').ok) return { blocked: 'fetch failed' }
-  const sym = tryGit(repo, 'ls-remote', '--symref', 'origin', 'HEAD')
-  const def = /^ref: refs\/heads\/(\S+)\s+HEAD/m.exec(sym.out)?.[1]
-  if (!def) return { blocked: 'no default branch on origin' }
-  if (branch.out !== def) return { blocked: `not on ${def}` }
-  const local = git(repo, 'rev-parse', 'HEAD')
-  const remote = tryGit(repo, 'rev-parse', '--verify', '--quiet', `refs/remotes/origin/${def}`)
-  if (!remote.ok) return { blocked: `no origin/${def}` }
-  if (local === remote.out) return { branch: def }
-  const isAncestor = (a, b) => tryGit(repo, 'merge-base', '--is-ancestor', a, b).ok
-  if (isAncestor(local, remote.out)) return { blocked: 'behind origin' }
-  if (isAncestor(remote.out, local)) return { blocked: 'ahead of origin' }
-  return { blocked: 'diverged from origin' }
 }
 
 // One module, one throwaway worktree: raise the range, let the package manager rewrite the
