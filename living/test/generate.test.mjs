@@ -22,6 +22,7 @@ test('/generate never asks for a secret in the chat, and stops the template\'s s
   const body = readFileSync(CMD, 'utf8')
   assert.match(body, /Never ask\s+for a secret in the chat/)
   assert.match(body, /every section before "Prove it"/)
+  assert.match(body, /names as sanctioned/)
 })
 
 test('/generate relies on a template section every template must have', () => {

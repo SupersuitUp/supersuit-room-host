@@ -64,9 +64,11 @@ node living/private-words.mjs     # must say: no private words outside tailor/
 ## 4. Rewrite tailor/
 
 Follow `tailor/README.md` field by field. The sample values are placeholders; every one of them
-gets replaced or deliberately kept. Values that only exist once their accounts do (an API key, an
-app id, the final address) stay as placeholders until step 5 fills them, and step 6 refuses any
-that are left. Change nothing outside `tailor/`.
+gets replaced or deliberately kept. Fill everything their answers already settle (including the
+address, when they are not using their own domain); values that only exist once their accounts do
+(an API key, an app id) stay as placeholders until step 5 fills them, and step 6 refuses any that
+are left. Change nothing outside `tailor/` except a change `TAILORING.md` names as sanctioned for
+their situation; that file then shows as diverging every night, which is expected.
 
 ## 5. Their infrastructure
 
