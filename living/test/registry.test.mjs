@@ -31,10 +31,43 @@ test('the throwaway registry serves what was published to npm view and npm insta
 test('the registry process is gone after close, and nothing was written under the real home', async () => {
   const base = tmp('registry')
   const reg = await startRegistry(base)
-  isolateNpm(base, reg)
-  reg.close()
-  await new Promise((r) => setTimeout(r, 300))
-  await assert.rejects(fetch(reg.url + MOD))
-  cleanup(base)
+  try {
+    isolateNpm(base, reg)
+    reg.close()
+    await new Promise((r) => setTimeout(r, 300))
+    await assert.rejects(fetch(reg.url + MOD))
+  } finally { reg.close(); cleanup(base) }
   assert.equal(existsSync(join(homedir(), '.living-template', 'registry')), false)
+})
+
+test('isolateNpm points npm\'s global config at a throwaway file too', async () => {
+  const base = tmp('registry')
+  const reg = await startRegistry(base)
+  try {
+    isolateNpm(base, reg)
+    assert.equal(process.env.npm_config_globalconfig, join(base, 'npmrc-global'))
+    assert.equal(existsSync(join(base, 'npmrc-global')), true)
+  } finally { reg.close(); cleanup(base) }
+})
+
+// publish packs a real tarball; it must never run while npm could reach a real registry.
+test('publish refuses unless npm is pointed at this throwaway registry', async () => {
+  const base = tmp('registry')
+  const reg = await startRegistry(base)
+  const saved = { ...process.env }
+  try {
+    for (const k of ['npm_config_registry', 'npm_config_userconfig', 'npm_config_globalconfig']) delete process.env[k]
+    assert.throws(() => reg.publish(MOD, '0.1.2'), /throwaway registry/)
+    process.env.npm_config_registry = 'https://registry.npmjs.org/'
+    assert.throws(() => reg.publish(MOD, '0.1.2'), /throwaway registry/)
+    isolateNpm(base, reg)
+    process.env.npm_config_globalconfig = join(homedir(), '.npmrc')
+    assert.throws(() => reg.publish(MOD, '0.1.2'), /throwaway registry/)
+    isolateNpm(base, reg)
+    reg.publish(MOD, '0.1.2')
+  } finally {
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k]
+    Object.assign(process.env, saved)
+    reg.close(); cleanup(base)
+  }
 })

@@ -21,10 +21,12 @@ export async function startRegistry(base) {
     child.once('exit', (code) => fail(new Error(`registry exited ${code}`)))
   })
   let n = 0
+  const url = `http://127.0.0.1:${port}/`
   return {
-    url: `http://127.0.0.1:${port}/`,
+    url,
     // A version whose module says it works, or (works: false) one that breaks the app's check.
     publish(name, version, { works = true } = {}) {
+      assertIsolated(url, base)
       const src = join(base, `pkg-src-${n++}`)
       mkdirSync(src, { recursive: true })
       writeFileSync(join(src, 'package.json'), JSON.stringify({ name, version, main: 'index.js' }) + '\n')
@@ -43,9 +45,11 @@ export async function startRegistry(base) {
 // no cache or store of the real machine's touched (pnpm's metadata cache is cache_dir).
 export function isolateNpm(base, reg) {
   writeFileSync(join(base, 'npmrc'), '')
+  writeFileSync(join(base, 'npmrc-global'), '')
   Object.assign(process.env, {
     npm_config_registry: reg.url,
     npm_config_userconfig: join(base, 'npmrc'),
+    npm_config_globalconfig: join(base, 'npmrc-global'),
     npm_config_cache: join(base, 'npm-cache'),
     npm_config_cache_dir: join(base, 'pnpm-cache'),
     npm_config_store_dir: join(base, 'pnpm-store'),
@@ -53,6 +57,16 @@ export function isolateNpm(base, reg) {
     npm_config_fund: 'false',
     npm_config_update_notifier: 'false',
   })
+}
+
+// Nothing in these tests may ever reach a real registry or a real ~/.npmrc: anything that packs or
+// installs first checks that npm is pointed at the 127.0.0.1 registry and at config files under
+// the test's own base, which only isolateNpm arranges.
+export function assertIsolated(url, base) {
+  const env = process.env
+  const ok = env.npm_config_registry === url && /^http:\/\/127\.0\.0\.1:\d+\/$/.test(url ?? '') &&
+    [env.npm_config_userconfig, env.npm_config_globalconfig].every((f) => typeof f === 'string' && f.startsWith(base + '/'))
+  if (!ok) throw new Error(`refusing: npm is not pointed at the throwaway registry ${url} (run isolateNpm first)`)
 }
 
 const CHECK = `// The fixture template's own check: every dependency must load and say it works.
