@@ -6,13 +6,13 @@
 //
 //   node living/update.mjs [--repo <path>] [--dry-run] [--json]
 //   exit 0 updated / current / ahead (dry run), 2 blocked, 1 crashed
-import { existsSync, readFileSync, mkdtempSync, rmSync, unlinkSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { git, tryGit, lines, isKept } from './git.mjs'
 import { divergence } from './divergence.mjs'
+import { runCheck } from './check.mjs'
 
 const PARENT = 'template'
 
@@ -88,27 +88,6 @@ export async function update({ repo = process.cwd(), dryRun = false } = {}) {
     tryGit(repo, 'worktree', 'remove', '--force', wt)
     rmSync(wt, { recursive: true, force: true })
   }
-}
-
-// The repository's own check, which the repository defines and the meta-template never does.
-function runCheck(dir) {
-  const pkgPath = join(dir, 'package.json')
-  const pkg = existsSync(pkgPath) ? JSON.parse(readFileSync(pkgPath, 'utf8')) : null
-  if (!pkg?.scripts?.['living:check']) return { ok: false, reason: 'no living:check script', output: '' }
-  const pm = existsSync(join(dir, 'pnpm-lock.yaml')) ? 'pnpm' : 'npm'
-  const install = pm === 'pnpm' ? ['install', '--frozen-lockfile'] : existsSync(join(dir, 'package-lock.json')) ? ['ci'] : null
-  if (install) {
-    const r = run(pm, install, dir)
-    if (!r.ok) return { ok: false, reason: 'install failed', output: r.output }
-  }
-  const r = run(pm, ['run', 'living:check'], dir)
-  return r.ok ? { ok: true } : { ok: false, reason: 'check failed', output: r.output }
-}
-
-function run(cmd, args, cwd) {
-  const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, env: { ...process.env, CI: '1' } })
-  const output = `${r.stdout ?? ''}${r.stderr ?? ''}`.slice(-4000)
-  return { ok: r.status === 0, output }
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
