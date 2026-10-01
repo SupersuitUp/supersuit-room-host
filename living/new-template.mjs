@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs'
 import { resolve, dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { git } from './git.mjs'
+import { cliArgs } from './cli.mjs'
 
 const HERE = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -21,10 +22,10 @@ export function newTemplate({ from, dir }) {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const args = process.argv.slice(2)
-  const i = args.indexOf('--from')
-  const from = i >= 0 ? args.splice(i, 2)[1] : git(HERE, 'remote', 'get-url', 'origin')
-  if (!args[0]) { console.error('usage: new-template.mjs <dir> [--from <url>]'); process.exit(1) }
-  const r = newTemplate({ from, dir: args[0] })
+  const USAGE = 'usage: new-template.mjs <dir> [--from <meta-template url or path>]\n       new-template.mjs -h | --help'
+  const { positionals: [dir], values } = cliArgs(process.argv.slice(2), USAGE, { value: ['--from'], positionals: 1 })
+  if (!dir) { console.error(USAGE); process.exit(1) }
+  const from = values['--from'] ?? git(HERE, 'remote', 'get-url', 'origin')
+  const r = newTemplate({ from, dir })
   console.log(`${r.dir}: new living template, listening to ${r.template}. Next: give it an origin, add the app, define living:check.`)
 }

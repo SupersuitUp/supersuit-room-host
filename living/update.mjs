@@ -14,6 +14,7 @@ import { pathToFileURL } from 'node:url'
 import { git, tryGit, lines, isKept, changedFiles, inSyncWithOrigin } from './git.mjs'
 import { divergence } from './divergence.mjs'
 import { runCheck } from './check.mjs'
+import { cliArgs } from './cli.mjs'
 
 const PARENT = 'template'
 
@@ -109,11 +110,11 @@ export async function update({ repo = process.cwd(), dryRun = false } = {}) {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const args = process.argv.slice(2)
-  const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined }
+  const USAGE = 'usage: update.mjs [--repo <path>] [--dry-run] [--json]\n       update.mjs -h | --help'
+  const { flags, values } = cliArgs(process.argv.slice(2), USAGE, { bool: ['--dry-run', '--json'], value: ['--repo'] })
   try {
-    const r = await update({ repo: opt('--repo') ?? process.cwd(), dryRun: args.includes('--dry-run') })
-    if (args.includes('--json')) console.log(JSON.stringify(r, null, 2))
+    const r = await update({ repo: values['--repo'] ?? process.cwd(), dryRun: flags.has('--dry-run') })
+    if (flags.has('--json')) console.log(JSON.stringify(r, null, 2))
     else {
       console.log(`${r.repo}: ${r.status}${r.blockedBy ? ` (${r.blockedBy.reason})` : ''}`)
       for (const m of r.fastForwarded ?? []) console.log(`  caught up with origin: ${m}`)

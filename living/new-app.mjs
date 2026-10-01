@@ -10,6 +10,7 @@ import { existsSync, writeFileSync } from 'node:fs'
 import { resolve, dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { git } from './git.mjs'
+import { cliArgs } from './cli.mjs'
 import { addForbidden, scan } from './private-words.mjs'
 
 export function newApp({ from, dir, privateWords = [], templateCheckout = null }) {
@@ -36,11 +37,11 @@ export function newApp({ from, dir, privateWords = [], templateCheckout = null }
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const args = process.argv.slice(2)
-  const take = (name) => { const out = []; let i; while ((i = args.indexOf(name)) >= 0) out.push(args.splice(i, 2)[1]); return out }
-  const [from] = take('--from'); const [templateCheckout] = take('--template-checkout'); const words = take('--word')
-  if (!args[0] || !from) { console.error('usage: new-app.mjs <dir> --from <url> [--template-checkout <path>] [--word <w>]...'); process.exit(1) }
-  const r = newApp({ from, dir: args[0], privateWords: words, templateCheckout })
+  const USAGE = 'usage: new-app.mjs <dir> --from <template url or path> [--template-checkout <path>] [--word <w>]...\n       new-app.mjs -h | --help'
+  const { positionals: [dir], values, multi } = cliArgs(process.argv.slice(2), USAGE, { value: ['--from', '--template-checkout'], multi: ['--word'], positionals: 1 })
+  const from = values['--from']; const templateCheckout = values['--template-checkout']; const words = multi['--word']
+  if (!dir || !from) { console.error(USAGE); process.exit(1) }
+  const r = newApp({ from, dir, privateWords: words, templateCheckout })
   console.log(`${r.dir}: new tailored app, listening to ${r.template}. Next: rewrite tailor/, give it an origin, follow the template's TAILORING.md.`)
   if (r.templateHits.length) {
     for (const h of r.templateHits) console.log(`  the template already contains one of this app's private words at ${h.file}:${h.line}`)

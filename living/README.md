@@ -52,7 +52,7 @@ living-template-template      this repository: the machinery, nothing else
 | `node living/new-template.mjs <dir>` | A new living template from this repository. |
 | `node living/new-app.mjs <dir> --from <template> --template-checkout <path> --word <w>...` | A new tailored app from a template; fingerprints its private words into the template. |
 | `node living/nightly.mjs` | Update every registered repository on this machine, parents first. |
-| `node living/install-nightly.mjs <repo> [--template] [--register-only] [--notify "<cmd>" \| --no-notify] [--move-job]` | Register a repository and install the 03:30 LaunchAgent (macOS). `--template` also bumps its modules each night; never use it for a tailored app. `--register-only` edits the registry and leaves the job alone. Exit 2 is a refusal, with nothing changed. |
+| `node living/install-nightly.mjs <repo> [--template] [--register-only] [--notify "<cmd>" \| --no-notify] [--move-job]` | Register a repository and install the 03:30 LaunchAgent (macOS). `--template` also bumps its modules each night; never use it for a tailored app. `--register-only` edits the registry and leaves the job alone. Exit 2 is a refusal, with nothing changed (an unknown flag, or a path that is not an existing git repo). |
 
 `LIVING_NOTIFY_CMD` is a shell command that receives a report as JSON on stdin whenever a
 nightly run published something, was blocked, or has a newly held, refused or skipped module
@@ -104,6 +104,9 @@ listening to the template.
 
 **The template's owner making a copy for someone:** `living/KIT.md`, which also fingerprints the
 new copy's private words into the template.
+
+Every command here takes `-h` / `--help` (usage, exit 0, nothing touched) and refuses an unknown flag
+with exit 2 naming it, through the shared parser in `living/cli.mjs`.
 
 ## Tests
 

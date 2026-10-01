@@ -17,6 +17,7 @@ import { pathToFileURL } from 'node:url'
 import { git, tryGit, changedFiles, inSyncWithOrigin } from './git.mjs'
 import { packageManager, runCheck, run } from './check.mjs'
 import { declaredModules, badModulePatterns, planModule } from './modules.mjs'
+import { cliArgs } from './cli.mjs'
 
 export function npmVersions(name, cwd) {
   const r = spawnSync('npm', ['view', name, 'versions', '--json'], { cwd, encoding: 'utf8', env: process.env })
@@ -120,12 +121,11 @@ function installedVersion(dir, name) {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const args = process.argv.slice(2)
-  const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined }
-  const allowMajor = args.flatMap((a, i) => (a === '--allow-major' && args[i + 1] ? [args[i + 1]] : []))
+  const USAGE = 'usage: bump.mjs [--repo <path>] [--dry-run] [--json] [--allow-major <module>]...\n       bump.mjs -h | --help'
+  const { flags, values, multi } = cliArgs(process.argv.slice(2), USAGE, { bool: ['--dry-run', '--json'], value: ['--repo'], multi: ['--allow-major'] })
   try {
-    const r = await bump({ repo: opt('--repo') ?? process.cwd(), dryRun: args.includes('--dry-run'), allowMajor })
-    if (args.includes('--json')) console.log(JSON.stringify(r, null, 2))
+    const r = await bump({ repo: values['--repo'] ?? process.cwd(), dryRun: flags.has('--dry-run'), allowMajor: multi['--allow-major'] })
+    if (flags.has('--json')) console.log(JSON.stringify(r, null, 2))
     else {
       console.log(`${r.repo}: modules ${r.status}${r.blockedBy ? ` (${r.blockedBy.reason})` : ''}`)
       for (const x of r.taken) console.log(`  ${r.status === 'ahead' ? 'would take' : 'took'} ${x.name} ${x.to} (was ${x.from})${x.warning ? `; ${x.warning}` : ''}`)

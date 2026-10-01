@@ -18,6 +18,7 @@ import { pathToFileURL } from 'node:url'
 import { tryGit } from './git.mjs'
 import { update } from './update.mjs'
 import { bump, statusOf } from './bump.mjs'
+import { cliArgs } from './cli.mjs'
 
 export const HOME = join(homedir(), '.living-template')
 export const REGISTRY = join(HOME, 'repos.json')
@@ -153,16 +154,16 @@ export function shellNotifier(cmd) {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const args = process.argv.slice(2)
-  const i = args.indexOf('--registry')
-  const registry = i >= 0 ? resolve(args[i + 1]) : REGISTRY
+  const USAGE = 'usage: nightly.mjs [--registry <file>] [--json]\n       nightly.mjs -h | --help'
+  const { flags, values } = cliArgs(process.argv.slice(2), USAGE, { bool: ['--json'], value: ['--registry'] })
+  const registry = values['--registry'] ? resolve(values['--registry']) : REGISTRY
   const cmd = process.env.LIVING_NOTIFY_CMD
   const reports = await nightly({ registry, notify: cmd ? shellNotifier(cmd) : null })
   // Beside the registry, so a throwaway --registry run never overwrites the machine's real record.
   const home = dirname(registry)
   mkdirSync(home, { recursive: true })
   writeFileSync(join(home, 'last-run.json'), JSON.stringify({ at: new Date().toISOString(), reports }, null, 2) + '\n')
-  if (args.includes('--json')) console.log(JSON.stringify(reports, null, 2))
+  if (flags.has('--json')) console.log(JSON.stringify(reports, null, 2))
   else for (const r of reports) console.log(`${new Date().toISOString()} ${r.repo}: ${r.kind === 'modules' ? 'modules ' : ''}${r.status}${r.blockedBy ? ` (${r.blockedBy.reason})` : ''}`)
   process.exit(reports.some((r) => r.status === 'blocked') ? 2 : 0)
 }

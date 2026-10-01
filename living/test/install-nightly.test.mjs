@@ -76,7 +76,7 @@ function sandbox() {
   const plistFile = join(base, 'LaunchAgents', 'job.plist')
   mkdirSync(join(base, 'LaunchAgents'), { recursive: true })
   const loads = []
-  const opts = { env: {}, registry, plistFile, script: LIVE, load: (f) => { loads.push(f); return { ok: true } }, exists: always, log: join(base, 'home', 'nightly.log') }
+  const opts = { env: {}, registry, plistFile, script: LIVE, load: (f) => { loads.push(f); return { ok: true } }, exists: always, isRepo: always, log: join(base, 'home', 'nightly.log') }
   return { base, registry, plistFile, loads, opts }
 }
 

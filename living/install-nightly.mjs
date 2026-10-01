@@ -14,13 +14,17 @@
 //                    in the live plist is kept. Removing it takes --no-notify; nothing drops it silently.
 //   --move-job       run the job from THIS copy of the framework. Without it a re-run keeps the job
 //                    on the copy it already runs, and refuses if that copy no longer exists.
-//   exit 0 done, 1 usage or launchctl failed, 2 refused (nothing written)
-import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'node:fs'
+//   -h, --help       print usage and exit 0; nothing is read or written.
+//   exit 0 done, 1 usage or launchctl failed, 2 refused (nothing written): an unknown flag, a path
+//   that is not an existing git repository, or a notify/script conflict
+import { writeFileSync, readFileSync, mkdirSync, existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { register, HOME, REGISTRY } from './nightly.mjs'
+import { parseCli } from './cli.mjs'
+import { tryGit } from './git.mjs'
 
 export const LABEL = 'com.living-template.nightly'
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -60,16 +64,22 @@ ${env.map(([k, v]) => `    <key>${k}</key>\n    <string>${esc(v)}</string>`).joi
 
 const FLAGS = ['--template', '--register-only', '--no-notify', '--move-job']
 
+export const USAGE = 'usage: install-nightly.mjs <repo> [--template] [--register-only] [--notify "<cmd>" | --no-notify] [--move-job]\n       install-nightly.mjs -h | --help'
+
+// { help } for -h/--help, { error } for anything undeclared, else the parsed command line.
 export function parseArgs(argv, env = process.env) {
-  const args = [...argv]
-  const i = args.indexOf('--notify')
-  const notify = i >= 0 ? args.splice(i, 2)[1] : env.LIVING_NOTIFY_CMD
-  const has = Object.fromEntries(FLAGS.map((f) => {
-    const at = args.indexOf(f)
-    if (at >= 0) args.splice(at, 1)
-    return [f, at >= 0]
-  }))
-  return { repo: args[0], notify, template: has['--template'], registerOnly: has['--register-only'], noNotify: has['--no-notify'], moveJob: has['--move-job'] }
+  const r = parseCli(argv, { bool: FLAGS, value: ['--notify'], positionals: 1 })
+  if (r.help || r.error) return r
+  const has = (f) => r.flags.has(f)
+  return { repo: r.positionals[0], notify: r.values['--notify'] ?? env.LIVING_NOTIFY_CMD, template: has('--template'), registerOnly: has('--register-only'), noNotify: has('--no-notify'), moveJob: has('--move-job') }
+}
+
+// The registry only ever holds working repositories: the path must be the top of an existing git checkout.
+export function isGitRepo(path) {
+  try {
+    const top = tryGit(path, 'rev-parse', '--show-toplevel')
+    return top.ok && realpathSync(top.out) === realpathSync(path)
+  } catch { return false }
 }
 
 const unesc = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&')
@@ -123,10 +133,13 @@ function loadJob(file) {
 // Everything the command does, with every path injectable so tests use throwaway files only.
 // Refusals are decided before anything is written: a refused run leaves the registry, the plist
 // and the job exactly as they were.
-export function install({ argv, env = process.env, registry = REGISTRY, plistFile = PLIST, script = THIS_SCRIPT, load = loadJob, exists = existsSync, node = process.execPath, log = join(HOME, 'nightly.log') }) {
+export function install({ argv, env = process.env, registry = REGISTRY, plistFile = PLIST, script = THIS_SCRIPT, load = loadJob, exists = existsSync, isRepo = isGitRepo, node = process.execPath, log = join(HOME, 'nightly.log') }) {
   const a = parseArgs(argv, env)
   const out = []
-  if (!a.repo) return { code: 1, out, err: 'usage: install-nightly.mjs <repo> [--template] [--register-only] [--notify "<cmd>" | --no-notify] [--move-job]' }
+  if (a.help) return { code: 0, out: [USAGE] }
+  if (a.error) return { code: 2, out, err: `refused, nothing changed: ${a.error}\n${USAGE}` }
+  if (!a.repo) return { code: 1, out, err: USAGE }
+  if (!isRepo(a.repo)) return { code: 2, out, err: `refused, nothing changed: ${a.repo} is not a git repo (not an existing git checkout)` }
   if (a.registerOnly) {
     const repos = register(a.repo, registry, { template: a.template })
     out.push(`registered ${repos.length} repo(s) in ${registry}${a.template ? `; ${a.repo} as a template` : ''}; the nightly job was not touched`)
