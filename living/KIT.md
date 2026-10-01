@@ -21,7 +21,10 @@ Do this in order:
 2. **Create the copy:**
    `node living/new-app.mjs <folder> --from <template URL> --template-checkout <local template checkout, if you have one> --word "<each name>" --word "<their domain>"`.
    Every private word (names, email domains, the app's address) is fingerprinted into the
-   template so the template can never pick it up. If the command reports that the template
+   template so the template can never pick it up. **A first name that is also an ordinary word
+   (Will, Grace, Hope, May) goes in as the full name only**, never alone: matching is by whole
+   word, so a bare `Will` forbids every "will" in the code, and the command reports hits all over
+   the template. Distinctive single names and surnames are fine on their own. If the command reports that the template
    already contains one, stop and tell the template's owner.
 3. **Rewrite `tailor/` for them**, following `tailor/README.md`. Change nothing outside it. If
    the app cannot do what they need without a code change, make it, and say so: it will show up
