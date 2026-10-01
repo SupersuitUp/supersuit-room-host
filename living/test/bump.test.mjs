@@ -196,3 +196,16 @@ test('a take that crashes refuses that module and the next module is still taken
   assert.equal(JSON.parse(sh(c.template.work, 'show', 'origin/main:package.json')).dependencies[MOD], '^0.1.3')
   assert.equal(sh(c.template.work, 'worktree', 'list').split('\n').length, 1)
 })
+
+test('a checkout whose origin cannot be fetched is blocked and takes nothing', async (t) => {
+  const { c } = await family(t, newer)
+  const before = head(c.template.work)
+  sh(c.template.work, 'remote', 'set-url', 'origin', join(c.base, 'no-such-origin.git'))
+  const r = await bump({ repo: c.template.work })
+  assert.equal(r.status, 'blocked')
+  assert.equal(r.blockedBy.reason, 'fetch failed')
+  assert.deepEqual(r.taken, [])
+  assert.deepEqual(r.refused, [])
+  assert.equal(head(c.template.work), before)
+  assert.equal(sh(c.template.work, 'worktree', 'list').split('\n').length, 1)
+})
