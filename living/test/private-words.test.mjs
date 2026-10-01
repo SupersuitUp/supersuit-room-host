@@ -51,6 +51,17 @@ test('the same words inside tailor/ are fine, and untracked files are not scanne
   } finally { cleanup(base) }
 })
 
+test('a copy may name itself in its own README, but never someone the template forbids', () => {
+  const { base, work } = repoWith({
+    'tailor/private-words.txt': 'zebulon\n',
+    'tailor/forbidden.sha256': fingerprint('quillon') + '\n',
+    'README.md': 'Zebulon and friends run this copy.\nNot Quillon.\n',
+  })
+  try {
+    assert.deepEqual(scan(work).map((h) => [h.file, h.line]), [['README.md', 2]])
+  } finally { cleanup(base) }
+})
+
 test('a word that merely contains a forbidden word is not a hit', () => {
   const { base, work } = repoWith({
     'tailor/forbidden.sha256': fingerprint('ben') + '\n',

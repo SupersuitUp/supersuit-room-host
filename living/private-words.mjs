@@ -8,6 +8,9 @@
 //   private-words.txt  plain words or phrases, one per line. An APP forbids its own names in its
 //                      own repository, where writing them down is no leak.
 //
+// README.md is kept per copy, so a copy's OWN words may appear in it; forbidden fingerprints
+// may not, anywhere.
+//
 // Matching is by whole words (a phrase is a run of whole words), so "ben" never hits "benefit".
 //
 //   node living/private-words.mjs [--repo <path>]          exit 1 and list hits, 0 when clean
@@ -16,7 +19,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { git, lines } from './git.mjs'
+import { git, lines, isKept } from './git.mjs'
 
 const MAX_PHRASE = 4
 const FORBIDDEN = 'tailor/forbidden.sha256'
@@ -46,11 +49,15 @@ function candidates(line) {
 
 export function scan(repo = process.cwd()) {
   repo = resolve(repo)
-  const banned = new Set([...readList(repo, FORBIDDEN), ...readList(repo, PLAIN).map(fingerprint)])
-  if (banned.size === 0) return []
+  const forbidden = new Set(readList(repo, FORBIDDEN))
+  const own = new Set(readList(repo, PLAIN).map(fingerprint))
+  if (forbidden.size + own.size === 0) return []
   const hits = []
   for (const file of lines(git(repo, 'ls-files'))) {
     if (file.startsWith('tailor/')) continue
+    // README.md belongs to the copy (it is kept on every update), so the copy may name itself
+    // there; a name the template forbids is still refused.
+    const banned = isKept(file) ? forbidden : new Set([...forbidden, ...own])
     const full = join(repo, file)
     if (!existsSync(full)) continue
     const buf = readFileSync(full)
