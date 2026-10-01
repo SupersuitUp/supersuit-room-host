@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 // The nightly runner: every living repository registered on this machine, parents first, one
 // update each. A change to the meta-template reaches its templates and then their apps in a
-// single run. Only a night where something published or something was blocked is reported;
-// a quiet night says nothing.
+// single run. A repository registered as a TEMPLATE also gets the module bump right after its
+// own update, so the version it takes reaches its apps in the same run; an app never picks a
+// module version itself. Only a night where something published, was blocked, or is newly held
+// is reported; a quiet night says nothing, and the same held or refused version is told once.
 //
 //   node living/nightly.mjs [--registry <file>] [--json]
-//   registry: ~/.living-template/repos.json, { "repos": ["/abs/path", ...] }
+//   registry: ~/.living-template/repos.json, { "repos": ["/abs/path", ...], "templates": [...] }
+//   beside the registry: last-run.json and modules-seen.json
 //   LIVING_NOTIFY_CMD: a shell command given each report worth telling as JSON on stdin
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -14,18 +17,24 @@ import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { tryGit } from './git.mjs'
 import { update } from './update.mjs'
+import { bump, statusOf } from './bump.mjs'
 
 export const HOME = join(homedir(), '.living-template')
 export const REGISTRY = join(HOME, 'repos.json')
 
-const readRegistry = (file) => (existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).repos ?? [] : [])
+const readJson = (file) => (existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {})
+const readRegistry = (file) => readJson(file).repos ?? []
+const readTemplates = (file) => readJson(file).templates ?? []
 
-export function register(repo, file = REGISTRY) {
-  const repos = readRegistry(file)
+export function register(repo, file = REGISTRY, { template = false } = {}) {
+  const reg = readJson(file)
+  const repos = reg.repos ?? []
+  const templates = reg.templates ?? []
   const path = resolve(repo)
   if (!repos.includes(path)) repos.push(path)
+  if (template && !templates.includes(path)) templates.push(path)
   mkdirSync(dirname(file), { recursive: true })
-  writeFileSync(file, JSON.stringify({ repos }, null, 2) + '\n')
+  writeFileSync(file, JSON.stringify(templates.length ? { repos, templates } : { repos }, null, 2) + '\n')
   return repos
 }
 
@@ -49,7 +58,32 @@ export function orderParentsFirst(repos) {
   return repos.map((r, i) => ({ r, d: depth(r), i })).sort((a, b) => a.d - b.d || a.i - b.i).map((x) => x.r)
 }
 
-export async function nightly({ registry = REGISTRY, notify = null } = {}) {
+// What one repository's module report adds to what was already told. A taken version is always
+// news; a held or refused version, or a block, only the first night it appears.
+// A blocked report returned before any module was looked at, so its empty held and refused
+// lists say nothing: the previous ones are carried forward, or the night it recovers would
+// tell the same held version again.
+export function remember(m, prev = {}) {
+  if (m.blockedBy) return { held: { ...prev.held }, refused: { ...prev.refused }, blocked: m.blockedBy.reason }
+  return {
+    held: Object.fromEntries(m.held.map((h) => [h.name, h.available])),
+    refused: Object.fromEntries(m.refused.map((f) => [f.name, f.to ?? f.reason])),
+    blocked: null,
+  }
+}
+
+export function freshNews(m, prev = {}) {
+  const held = m.held.filter((h) => prev.held?.[h.name] !== h.available)
+  const refused = m.refused.filter((f) => prev.refused?.[f.name] !== (f.to ?? f.reason))
+  const blockedBy = m.blockedBy && prev.blocked !== m.blockedBy.reason ? m.blockedBy : null
+  if (!m.taken.length && !held.length && !refused.length && !blockedBy) return null
+  const news = { ...m, held, refused, blockedBy }
+  return { ...news, status: statusOf(news) }
+}
+
+export async function nightly({ registry = REGISTRY, notify = null, bumpModules = bump, seenFile = join(dirname(registry), 'modules-seen.json') } = {}) {
+  const templates = new Set(readTemplates(registry).map((p) => resolve(p)))
+  const seen = templates.size ? readJson(seenFile) : {}
   const reports = []
   for (const repo of orderParentsFirst(readRegistry(registry))) {
     let r
@@ -62,6 +96,25 @@ export async function nightly({ registry = REGISTRY, notify = null } = {}) {
     if (r.blockedBy?.reason === 'no template remote') r = { ...r, status: 'root', blockedBy: null }
     reports.push(r)
     if (notify && (r.status === 'updated' || r.status === 'blocked')) await notify(r)
+
+    // The module bump, for templates only, and never on a checkout whose update was blocked
+    // (dirty, ahead, diverged, crashed...): that report has told the owner, and a bump would be
+    // blocked for the same reason and say the same thing again.
+    if (!templates.has(resolve(repo)) || r.status === 'blocked') continue
+    let m
+    try {
+      m = await bumpModules({ repo })
+    } catch (e) {
+      m = { repo, kind: 'modules', status: 'blocked', taken: [], refused: [], held: [], skipped: [], blockedBy: { reason: 'crashed', output: e.message } }
+    }
+    reports.push(m)
+    const news = freshNews(m, seen[m.repo])
+    seen[m.repo] = remember(m, seen[m.repo])
+    if (notify && news) await notify(news)
+  }
+  if (templates.size) {
+    mkdirSync(dirname(seenFile), { recursive: true })
+    writeFileSync(seenFile, JSON.stringify(seen, null, 2) + '\n')
   }
   return reports
 }
@@ -76,12 +129,14 @@ export function shellNotifier(cmd) {
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const args = process.argv.slice(2)
   const i = args.indexOf('--registry')
-  const registry = i >= 0 ? args[i + 1] : REGISTRY
+  const registry = i >= 0 ? resolve(args[i + 1]) : REGISTRY
   const cmd = process.env.LIVING_NOTIFY_CMD
   const reports = await nightly({ registry, notify: cmd ? shellNotifier(cmd) : null })
-  mkdirSync(HOME, { recursive: true })
-  writeFileSync(join(HOME, 'last-run.json'), JSON.stringify({ at: new Date().toISOString(), reports }, null, 2) + '\n')
+  // Beside the registry, so a throwaway --registry run never overwrites the machine's real record.
+  const home = dirname(registry)
+  mkdirSync(home, { recursive: true })
+  writeFileSync(join(home, 'last-run.json'), JSON.stringify({ at: new Date().toISOString(), reports }, null, 2) + '\n')
   if (args.includes('--json')) console.log(JSON.stringify(reports, null, 2))
-  else for (const r of reports) console.log(`${new Date().toISOString()} ${r.repo}: ${r.status}${r.blockedBy ? ` (${r.blockedBy.reason})` : ''}`)
+  else for (const r of reports) console.log(`${new Date().toISOString()} ${r.repo}: ${r.kind === 'modules' ? 'modules ' : ''}${r.status}${r.blockedBy ? ` (${r.blockedBy.reason})` : ''}`)
   process.exit(reports.some((r) => r.status === 'blocked') ? 2 : 0)
 }

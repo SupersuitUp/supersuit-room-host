@@ -3,8 +3,10 @@
 // macOS only (a LaunchAgent at 03:30 local time). The job runs THIS copy of nightly.mjs,
 // which is itself kept current by the nightly update of the repository it lives in.
 //
-//   node living/install-nightly.mjs <repo> [--notify "<shell command>"]
+//   node living/install-nightly.mjs <repo> [--template] [--notify "<shell command>"]
 //   LIVING_NOTIFY_CMD in the environment is used when --notify is not given.
+//   --template registers the repository as a TEMPLATE, so the nightly run also bumps its modules
+//   (living/bump.mjs); never use it for a tailored app.
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
@@ -48,12 +50,20 @@ ${env.map(([k, v]) => `    <key>${k}</key>\n    <string>${esc(v)}</string>`).joi
 `
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const args = process.argv.slice(2)
+export function parseArgs(argv) {
+  const args = [...argv]
   const i = args.indexOf('--notify')
   const notify = i >= 0 ? args.splice(i, 2)[1] : process.env.LIVING_NOTIFY_CMD
-  if (!args[0]) { console.error('usage: install-nightly.mjs <repo> [--notify "<cmd>"]'); process.exit(1) }
-  const repos = register(args[0])
+  const t = args.indexOf('--template')
+  const template = t >= 0
+  if (template) args.splice(t, 1)
+  return { repo: args[0], notify, template }
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  const { repo, notify, template } = parseArgs(process.argv.slice(2))
+  if (!repo) { console.error('usage: install-nightly.mjs <repo> [--template] [--notify "<cmd>"]'); process.exit(1) }
+  const repos = register(repo, REGISTRY, { template })
   mkdirSync(HOME, { recursive: true })
   const file = join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`)
   writeFileSync(file, plist({
@@ -67,5 +77,5 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   spawnSync('launchctl', ['bootout', `${domain}/${LABEL}`])
   const r = spawnSync('launchctl', ['bootstrap', domain, file], { encoding: 'utf8' })
   if (r.status !== 0) { console.error(`launchctl bootstrap failed: ${r.stderr}`); process.exit(1) }
-  console.log(`registered ${repos.length} repo(s) in ${REGISTRY}; nightly job ${LABEL} loaded (03:30)`)
+  console.log(`registered ${repos.length} repo(s) in ${REGISTRY}${template ? `; ${repo} as a template` : ''}; nightly job ${LABEL} loaded (03:30)`)
 }
