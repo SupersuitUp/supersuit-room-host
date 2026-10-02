@@ -95,6 +95,18 @@ The module report remembers what it has told in `modules-seen.json`, beside the 
 file is unreadable it is replaced by an empty one, a warning goes to `nightly.log`, and every
 repository is still updated; at worst a held version is told once more.
 
+## The check runs on what ships, and so does the checkout
+
+`living:check` always runs after a frozen install (`pnpm install --frozen-lockfile`, or `npm ci`
+for a `package-lock.json`, chosen by the lockfile) in the throwaway worktree, so the gate tests the
+lockfile that ships; a failed install is a block with reason `install failed`. The checkout keeps
+its own `node_modules`, though, and a fast-forward to a merge that changed `package.json` or a
+lockfile would leave them stale, so a later local `living:check` would test an older program than
+the deploy builds. `update.mjs` (the merge, and the catch-up when behind origin) and `bump.mjs`
+therefore run the same frozen install in the checkout after the fast-forward, only when the move
+touched a dependency file. It cannot block, since the commits are published by then: the report
+carries `install` (`installed`, `skipped` or `failed`) and a failure adds a `warning`.
+
 ## Making a tailored app
 
 **Someone making their own copy, on their own accounts:** clone the template, open it in Claude

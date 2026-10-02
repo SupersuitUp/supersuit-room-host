@@ -15,7 +15,7 @@ import { join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { git, tryGit, changedFiles, inSyncWithOrigin } from './git.mjs'
-import { packageManager, runCheck, run } from './check.mjs'
+import { packageManager, runCheck, run, syncCheckout } from './check.mjs'
 import { declaredModules, badModulePatterns, planModule } from './modules.mjs'
 import { cliArgs } from './cli.mjs'
 
@@ -106,8 +106,13 @@ function takeOne(repo, branch, m, take) {
     if (!push.ok) return { ok: false, reason: 'push failed', output: push.err }
     // Published is published: origin has it and apps will take it. A checkout that cannot follow
     // is a warning on the take, and the next run reports it as behind origin rather than retrying.
+    const was = git(repo, 'rev-parse', 'HEAD')
     const ff = tryGit(repo, 'merge', '--quiet', '--ff-only', sha)
     if (!ff.ok) return { ok: true, warning: `published; local checkout not fast-forwarded: ${ff.err || ff.out}`.slice(0, 1000) }
+    // The bump always changes package.json and the lockfile, so the checkout's node_modules are
+    // the old version until it installs. Published already, so a failure is a warning.
+    const synced = syncCheckout(repo, was, sha)
+    if (synced.status === 'failed') return { ok: true, warning: `published; install in the local checkout failed, so its node_modules are stale: ${synced.output}`.slice(0, 1000) }
     return { ok: true }
   } finally {
     tryGit(repo, 'worktree', 'remove', '--force', wt)

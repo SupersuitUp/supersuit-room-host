@@ -13,7 +13,7 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { git, tryGit, lines, isKept, changedFiles, inSyncWithOrigin } from './git.mjs'
 import { divergence } from './divergence.mjs'
-import { runCheck } from './check.mjs'
+import { runCheck, syncCheckout } from './check.mjs'
 import { cliArgs } from './cli.mjs'
 
 const PARENT = 'template'
@@ -41,9 +41,11 @@ export async function update({ repo = process.cwd(), dryRun = false } = {}) {
   if (sync.blocked === 'behind origin' && !dryRun) {
     const upstream = `refs/remotes/origin/${sync.branch}`
     const pulled = lines(git(repo, 'log', '--format=%h %s', `HEAD..${upstream}`))
+    const was = git(repo, 'rev-parse', 'HEAD')
     const ff = tryGit(repo, 'merge', '--quiet', '--ff-only', upstream)
     if (!ff.ok) return blocked('behind origin', { output: ff.err || ff.out })
     report.fastForwarded = pulled
+    report.install = syncCheckout(repo, was, git(repo, 'rev-parse', 'HEAD'))
     sync = inSyncWithOrigin(repo)
   }
   if (sync.blocked) return blocked(sync.blocked, sync.output ? { output: sync.output } : {})
@@ -100,8 +102,14 @@ export async function update({ repo = process.cwd(), dryRun = false } = {}) {
     // Published is published: origin has the merge and the children will take it. A checkout that
     // cannot follow is a warning on the update; the next run sees "behind origin" and catches up.
     // Divergence is then read from the worktree, whose HEAD is the published merge.
+    const was = git(repo, 'rev-parse', 'HEAD')
     const ff = tryGit(repo, 'merge', '--quiet', '--ff-only', mergeSha)
-    const warning = ff.ok ? null : `published; local checkout did not fast-forward: ${ff.err || ff.out}`.slice(0, 1000)
+    if (ff.ok) {
+      const inst = syncCheckout(repo, was, mergeSha)
+      if (report.install?.status !== 'failed' && (inst.status !== 'skipped' || !report.install)) report.install = inst
+    }
+    const installWarning = report.install?.status === 'failed' ? `published; install in the local checkout failed, so its node_modules are stale: ${report.install.output ?? ''}` : null
+    const warning = ff.ok ? installWarning : `published; local checkout did not fast-forward: ${ff.err || ff.out}`.slice(0, 1000)
     return { ...report, status: 'updated', divergent: divergence(ff.ok ? repo : wt, parentRef), ...(warning ? { warning } : {}) }
   } finally {
     tryGit(repo, 'worktree', 'remove', '--force', wt)
@@ -118,6 +126,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     else {
       console.log(`${r.repo}: ${r.status}${r.blockedBy ? ` (${r.blockedBy.reason})` : ''}`)
       for (const m of r.fastForwarded ?? []) console.log(`  caught up with origin: ${m}`)
+      if (r.install && r.install.status !== 'skipped') console.log(`  install in checkout: ${r.install.status}`)
       if (r.warning) console.log(`  warning: ${r.warning}`)
       for (const m of r.merged) console.log(`  ${r.status === 'updated' ? 'merged' : 'pending'} ${m}`)
       for (const f of r.blockedBy?.files ?? []) console.log(`  blocked by ${f}`)

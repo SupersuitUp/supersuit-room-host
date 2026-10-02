@@ -35,6 +35,15 @@ test('a newer version inside the range is taken when the template\'s check passe
   assert.equal(sh(c.template.work, 'worktree', 'list').split('\n').length, 1)
 })
 
+test('after a bump the checkout\'s own node_modules are the new version, so a local check tests what ships', async (t) => {
+  const { c } = await family(t, { before: (r) => r.publish(MOD, '0.1.2'), after: (r) => r.publish(MOD, '0.1.3') })
+  const installed = () => JSON.parse(read(c.template.work, `node_modules/${MOD}/package.json`)).version
+  assert.equal(installed(), '0.1.2')
+  const r = await bump({ repo: c.template.work })
+  assert.equal(r.status, 'bumped', JSON.stringify(r))
+  assert.equal(installed(), '0.1.3')
+})
+
 test('a newer version that fails the check is refused and nothing is published', async (t) => {
   const { c } = await family(t, { before: (r) => r.publish(MOD, '0.1.2'), after: (r) => r.publish(MOD, '0.1.3', { works: false }) })
   const before = head(c.template.work)
