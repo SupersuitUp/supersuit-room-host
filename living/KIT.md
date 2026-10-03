@@ -19,6 +19,9 @@ Do this in order:
 1. **Read the template's `TAILORING.md` and `tailor/README.md` first.** They say what the
    settings mean and what the app needs that is specific to it (a database project, a host,
    sign-in addresses, keys). Do not start until you can name each.
+   Read `living/FEEDBACK.md` too: every delivered app needs one welcome link and private
+   feedback/change requests with images, video and voice. A template missing those capabilities
+   needs an integration in its source before it can be delivered as satisfying the contract.
 2. **Create the copy:**
    `node living/new-app.mjs <folder> --from <template URL> --template-checkout <local template checkout, if you have one> --word "<each name>" --word "<their domain>"`.
    Every private word (names, email domains, the app's address) is fingerprinted into the

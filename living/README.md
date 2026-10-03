@@ -12,6 +12,10 @@ living-template-template      this repository: the machinery, nothing else
 
 ## The rules every level follows
 
+- **Every app has a welcome and feedback flow.** [FEEDBACK.md](FEEDBACK.md) defines the delivery
+  requirement: one stable welcome link, private detailed change requests and bug reports,
+  images/video/voice, recoverable drafts and receipts. The meta-template carries the contract;
+  shared app modules and each template's adapters carry the implementation.
 - **One parent, named `template`.** A template's `template` remote is this repository; an
   app's is its template. Nothing else is special about any level.
 - **`tailor/` belongs to the copy.** Whatever makes a copy someone's own lives there, and an

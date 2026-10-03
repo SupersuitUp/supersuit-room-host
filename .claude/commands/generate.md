@@ -25,7 +25,10 @@ git log --oneline -1
   so, and offer to run `node living/update.mjs` instead.
 - If `origin` points at the template (it does in a fresh clone), continue.
 - Read, in full, before doing anything else: `TAILORING.md` (what this app needs that is specific to
-  it), `tailor/README.md` (what every setting means) and `living/README.md` (how updates arrive).
+  it), `tailor/README.md` (what every setting means), `living/README.md` (how updates arrive), and
+  `living/FEEDBACK.md` (one welcome link and private feedback with images, video and voice).
+  Missing feedback capabilities are incomplete delivery. Record the gap and integrate them
+  in the template's source; do not claim that reading the contract implements the feature.
 
 ## 1. Keep listening to the template
 
