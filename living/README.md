@@ -50,6 +50,7 @@ living-template-template      this repository: the machinery, nothing else
 | Command | What it does |
 |---|---|
 | `node living/update.mjs [--repo P] [--dry-run] [--json]` | Merge the parent if it is ahead, keep `tailor/`, run `living:check`, publish only if green. Exit 0 updated or current, 2 blocked, 1 crashed. Reports divergent files. Publishes only from a checkout that is exactly origin's default branch (see below). |
+| [SUPER-APP.md](SUPER-APP.md), `tile-contract.mjs` | (library) The notification contract every tile in a super app holds to, and the three checks an app calls from its own tests: `checkTileNews`, `checkNewsLines`, `checkRouteCoverage`. |
 | `node living/bump.mjs [--repo P] [--dry-run] [--allow-major <name>]... [--json]` | For a template: take each module's newest version inside its declared range, check, publish only if green; hold anything outside the range. Exit 0, 2 blocked, 1 crashed. |
 | `node living/divergence.mjs` | (library) Parent files this copy changed on purpose, with what the parent changed there since. |
 | `node living/private-words.mjs [--repo P]` | Fail if a private word appears outside `tailor/`. `--add <word>...` fingerprints words into `tailor/forbidden.sha256`. |
