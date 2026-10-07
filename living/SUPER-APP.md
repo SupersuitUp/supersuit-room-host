@@ -90,7 +90,7 @@ describe('the tile contract', () => {
 
 `ignoreLibs` matters: the announce module itself defines `export function announceX(`, which matches
 the announce pattern without announcing anything. Pass its path suffix (starting with `/`, e.g.
-`/lib/announce.ts`) so a route that only imports it is not reported silent. The import scan reads
+`/lib/announce.ts`) so a route that only imports it is still reported silent. The import scan reads
 only `from '...'` with single quotes; a route using double quotes or a dynamic import is reported
 silent, which is the safe direction. `exempt` (default: paths ending `/upload-url`) and `announce`
 (the pattern) can be replaced when an app's conventions differ.
