@@ -61,6 +61,7 @@ One test file in the app calls the three functions with the app's own declaratio
 import { describe, it, expect } from 'vitest'
 import { join } from 'node:path'
 import { checkTileNews, checkNewsLines, checkRouteCoverage } from '../../../living/tile-contract.mjs'
+import type { TileNewsDecision } from '../../../living/tile-contract'
 import { TILES } from '../couple/schema'
 import { TILE_NEWS, QUIET_ROUTES, ACTIVITY_KINDS, tileForPath } from './notify-coverage'
 import { activityLine } from './activity'
@@ -88,6 +89,8 @@ describe('the tile contract', () => {
 ```
 
 `ignoreLibs` matters: the announce module itself defines `export function announceX(`, which matches
-the announce pattern without announcing anything. Pass its path suffix so a route that only imports
-it is still reported silent. `exempt` (default: paths ending `/upload-url`) and `announce` (the
-pattern) can be replaced when an app's conventions differ.
+the announce pattern without announcing anything. Pass its path suffix (starting with `/`, e.g.
+`/lib/announce.ts`) so a route that only imports it is not reported silent. The import scan reads
+only `from '...'` with single quotes; a route using double quotes or a dynamic import is reported
+silent, which is the safe direction. `exempt` (default: paths ending `/upload-url`) and `announce`
+(the pattern) can be replaced when an app's conventions differ.
