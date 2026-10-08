@@ -37,7 +37,7 @@ Any one of these:
 - the file imports a relative module that imports it (one hop, `./x`, `./x.ts` or `./x/index.ts`);
 - the file carries the exemption comment below.
 
-When any writer exists, `package.json` must also list `@supersuit/asset-index` in `dependencies`.
+When any writer is not exempt, `package.json` must list `@supersuit/asset-index` in `dependencies`.
 
 ## The exemption comment
 

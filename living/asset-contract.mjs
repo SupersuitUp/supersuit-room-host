@@ -56,16 +56,16 @@ export function checkAssetIndexing({ repo }) {
   const root = resolve(repo)
   const rel = (p) => relative(root, p).split(sep).join('/')
   const problems = []
-  const writers = []
+  const writers = [] // { file, kind: 'import' | 'hop' | 'exempt' | 'none' }
   for (const file of walk(join(root, 'src'))) {
     if (!EXTS.includes(file.slice(file.lastIndexOf('.')))) continue
     const src = readFileSync(file, 'utf8')
     if (!writesMedia(src)) continue
-    if (PKG_IMPORT.test(src) || exempt(src) || importsPackageViaOneHop(file, src)) continue
-    writers.push(file)
-    problems.push(`${rel(file)}: writes uploaded media but never reaches ${PKG} (import it, import a module that does, or add "asset-index: exempt <reason>")`)
+    const kind = PKG_IMPORT.test(src) ? 'import' : exempt(src) ? 'exempt' : importsPackageViaOneHop(file, src) ? 'hop' : 'none'
+    writers.push({ file, kind })
+    if (kind === 'none') problems.push(`${rel(file)}: writes uploaded media but never reaches ${PKG} (import it, import a module that does, or add "asset-index: exempt <reason>")`)
   }
-  if (writers.length) {
+  if (writers.some((w) => w.kind !== 'exempt')) {
     let deps = {}
     try { const j = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')); deps = j.dependencies || {} } catch {}
     if (!(PKG in deps)) problems.push(`package.json: ${PKG} is not in dependencies, and uploads are written under src/`)

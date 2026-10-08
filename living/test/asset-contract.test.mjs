@@ -87,6 +87,26 @@ test('test files, fixtures and node_modules are ignored', () => withRepo({
   'src/node_modules/x/w.js': WRITER,
 }, (r) => assert.equal(checkAssetIndexing({ repo: r }).ok, true)))
 
+const NODEP = (r) => checkAssetIndexing({ repo: r }).problems.filter((p) => p.startsWith('package.json'))
+
+test('a writer that imports the package but has no dependency is a problem', () => withRepo({
+  'package.json': PKG(),
+  'src/lib/photos.ts': "import { indexAsset } from '@supersuit/asset-index'\n" + WRITER,
+}, (r) => { assert.equal(checkAssetIndexing({ repo: r }).ok, false); assert.equal(NODEP(r).length, 1) }))
+
+test('a one-hop writer with no dependency is a problem', () => withRepo({
+  'package.json': PKG(),
+  'src/lib/photos.ts': "import { track } from './asset-index'\n" + WRITER,
+  'src/lib/asset-index.ts': "import { indexAsset } from '@supersuit/asset-index'\n",
+}, (r) => { assert.equal(checkAssetIndexing({ repo: r }).ok, false); assert.equal(NODEP(r).length, 1) }))
+
+test('all writers exempt with no dependency is ok; one non-exempt writer brings the requirement back', () => {
+  const ex = '// asset-index: exempt derived file\n' + WRITER
+  withRepo({ 'package.json': PKG(), 'src/a.ts': ex, 'src/b.ts': ex }, (r) => assert.equal(checkAssetIndexing({ repo: r }).ok, true))
+  withRepo({ 'package.json': PKG(), 'src/a.ts': ex, 'src/b.ts': "import 'x'\nimport { i } from '@supersuit/asset-index'\n" + WRITER },
+    (r) => assert.equal(NODEP(r).length, 1))
+})
+
 test('CLI exits 0 clean, 1 with problems, 2 on bad args', () => {
   const bad = repo({ 'package.json': PKG(), 'src/lib/photos.ts': WRITER })
   const good = repo({ 'package.json': PKG(), 'src/a.ts': 'export {}\n' })
