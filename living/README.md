@@ -16,6 +16,9 @@ living-template-template      this repository: the machinery, nothing else
   requirement: one stable welcome link, private detailed change requests and bug reports,
   images/video/voice, recoverable drafts and receipts. The meta-template carries the contract;
   shared app modules and each template's adapters carry the implementation.
+- **Every upload is findable.** [ASSETS.md](ASSETS.md) defines the contract: whatever writes uploaded
+  media indexes it with `@supersuit/asset-index`, or says why not. `node living/asset-contract.mjs`
+  checks it, and a template puts that command in its own `living:check`.
 - **One parent, named `template`.** A template's `template` remote is this repository; an
   app's is its template. Nothing else is special about any level.
 - **`tailor/` belongs to the copy.** Whatever makes a copy someone's own lives there, and an
@@ -54,6 +57,7 @@ living-template-template      this repository: the machinery, nothing else
 | `node living/bump.mjs [--repo P] [--dry-run] [--allow-major <name>]... [--json]` | For a template: take each module's newest version inside its declared range, check, publish only if green; hold anything outside the range. Exit 0, 2 blocked, 1 crashed. |
 | `node living/divergence.mjs` | (library) Parent files this copy changed on purpose, with what the parent changed there since. |
 | `node living/private-words.mjs [--repo P]` | Fail if a private word appears outside `tailor/`. `--add <word>...` fingerprints words into `tailor/forbidden.sha256`. |
+| [ASSETS.md](ASSETS.md), `node living/asset-contract.mjs [--repo P]` | Fail if a file under `src/` writes uploaded media without reaching `@supersuit/asset-index` or carrying `asset-index: exempt <reason>`. Exit 0 clean, 1 problems, 2 bad arguments. Library: `checkAssetIndexing({ repo })`. |
 | `node living/new-template.mjs <dir>` | A new living template from this repository. |
 | `node living/new-app.mjs <dir> --from <template> --template-checkout <path> --word <w>...` | A new tailored app from a template; fingerprints its private words into the template. |
 | `node living/nightly.mjs` | Update every registered repository on this machine, parents first. |
