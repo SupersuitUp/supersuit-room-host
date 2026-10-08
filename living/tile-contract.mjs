@@ -25,7 +25,50 @@ export function checkNewsLines({ kinds, lineFor, name }) {
   return kinds.filter((k) => !String(lineFor(k)).startsWith(`${name} `)).map((k) => `news kind "${k}" does not start with the person: "${lineFor(k)}"`)
 }
 
-const WRITES = /export async function (POST|PATCH|PUT)\b|export const \{[^}]*\b(POST|PATCH|PUT)\b/
+const WRITE_METHODS = new Set(['POST', 'PATCH', 'PUT'])
+
+// Blank out comments and string/template literals, keeping newlines, so a word inside them can
+// never look like code. Parser-free on purpose: a regex literal holding a quote can confuse it,
+// which route files almost never contain.
+export function stripCommentsAndStrings(src) {
+  let out = '', i = 0
+  const n = src.length
+  const blank = (s) => s.replace(/[^\n]/g, ' ')
+  while (i < n) {
+    const c = src[i], d = src[i + 1]
+    if (c === '/' && d === '/') {
+      let j = src.indexOf('\n', i); if (j < 0) j = n
+      out += blank(src.slice(i, j)); i = j
+    } else if (c === '/' && d === '*') {
+      let j = src.indexOf('*/', i + 2); j = j < 0 ? n : j + 2
+      out += blank(src.slice(i, j)); i = j
+    } else if (c === "'" || c === '"' || c === '`') {
+      let j = i + 1
+      while (j < n && src[j] !== c) j += src[j] === '\\' ? 2 : 1
+      j = Math.min(j + 1, n)
+      out += c + blank(src.slice(i + 1, j - 1)) + c; i = j
+    } else { out += c; i++ }
+  }
+  return out
+}
+
+// Does this route file export a POST, PATCH or PUT handler, in any shape Next.js accepts?
+// function (async or not), const/let/var (arrow, call, typed), a destructured const, and
+// `export { x as POST }` lists, with or without `from`.
+export function isWriteRoute(src) {
+  const code = stripCommentsAndStrings(src)
+  const M = '(POST|PATCH|PUT)'
+  if (new RegExp(`\\bexport\\s+(?:async\\s+)?function\\s*\\*?\\s*${M}\\b`).test(code)) return true
+  if (new RegExp(`\\bexport\\s+(?:const|let|var)\\s+${M}\\b`).test(code)) return true
+  if (new RegExp(`\\bexport\\s+(?:const|let|var)\\s*\\{[^}]*\\b${M}\\b`).test(code)) return true
+  for (const [, list] of code.matchAll(/\bexport\s+(?:type\s+)?\{([^}]*)\}/g)) {
+    for (const spec of list.split(',')) {
+      const words = spec.trim().split(/\s+/) // `x`, `x as POST`, `type X`: the exported name is last
+      if (words[0] !== 'type' && WRITE_METHODS.has(words[words.length - 1])) return true
+    }
+  }
+  return false
+}
 const ANNOUNCE = /\bannounce[A-Z]\w*\(/
 
 function routeFiles(dir) {
@@ -56,7 +99,7 @@ function announcesThrough(file, libDirs, announce, ignoreLibs) {
 export function checkRouteCoverage({ appDir, apiRoot, libDirs, tileForPath, tileNews, quietRoutes,
   announce = ANNOUNCE, exempt = (p) => p.endsWith('/upload-url'), ignoreLibs = [] }) {
   const apiPath = (f) => '/' + dirname(f).slice(appDir.length + 1)
-  const checked = routeFiles(apiRoot).filter((f) => WRITES.test(readFileSync(f, 'utf8')))
+  const checked = routeFiles(apiRoot).filter((f) => isWriteRoute(readFileSync(f, 'utf8')))
   const paths = checked.map(apiPath)
   const silent = checked.filter((f) => {
     const p = apiPath(f), t = tileForPath(p)

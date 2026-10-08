@@ -88,6 +88,11 @@ describe('the tile contract', () => {
 })
 ```
 
+A write route is any `route.ts` that exports `POST`, `PATCH` or `PUT` in a shape Next.js accepts:
+`export (async) function`, `export const|let` (arrow, wrapped call, typed), a destructured
+`export const { POST } = ...`, or an `export { handler as POST }` list, with or without `from`.
+Comments and string literals are blanked first, so a mention of POST in either is not a write.
+
 `ignoreLibs` matters: the announce module itself defines `export function announceX(`, which matches
 the announce pattern without announcing anything. Pass its path suffix (starting with `/`, e.g.
 `/lib/announce.ts`) so a route that only imports it is still reported silent. The import scan reads

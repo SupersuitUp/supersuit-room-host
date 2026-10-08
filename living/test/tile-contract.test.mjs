@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { checkTileNews, checkNewsLines, checkRouteCoverage } from '../tile-contract.mjs'
+import { checkTileNews, checkNewsLines, checkRouteCoverage, isWriteRoute } from '../tile-contract.mjs'
 
 const NEWS = { photos: { announces: ['upload', 'heart'] }, agenda: { privateToOwner: 'own list' } }
 
@@ -96,5 +96,48 @@ test('a route in a private or unknown tile is not held to announcing', () => {
     const r = checkRouteCoverage({ ...opts(root), quietRoutes: { '/api/photos/[id]': 'x' } })
     assert.ok(r.checked.includes('/api/agenda'))
     assert.deepEqual(r.silent, [])
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+// Every way a Next.js route file can export a write handler. A shape the detector misses is a
+// route that escapes the coverage check silently: quiet by omission, which the contract refuses.
+const WRITE_SHAPES = {
+  'async function': 'export async function POST(req) {}',
+  'plain function': 'export function PUT(req) { return new Response() }',
+  'const arrow': 'export const POST = async (req) => new Response()',
+  'const call': 'export const PATCH = withAuth(async (req) => new Response())',
+  'typed const': 'export const POST: Handler = async (req) => new Response()',
+  'let': 'export let PUT = handler',
+  'destructured const': 'export const { GET, POST } = handlers',
+  're-export': 'async function POST() {}\nexport { POST }',
+  'renamed re-export': 'async function handler() {}\nexport { handler as PATCH }',
+  'mixed re-export list': 'export { GET, handler as PUT, other }',
+  're-export from': "export { POST } from '@/lib/handlers'",
+  'type-only neighbour': 'export { type Body, POST }',
+}
+for (const [shape, src] of Object.entries(WRITE_SHAPES)) {
+  test(`a write route is detected: ${shape}`, () => assert.equal(isWriteRoute(src), true, src))
+}
+
+const NOT_WRITES = {
+  'GET only': 'export async function GET() {}',
+  'POST in a line comment': '// export async function POST() {}\nexport async function GET() {}',
+  'POST in a block comment': '/* export const POST = x */\nexport async function GET() {}',
+  'POST in a string': "export async function GET() { return 'export const POST = 1' }",
+  'POST in a template': 'export async function GET() { return `export { POST }` }',
+  'longer name': 'export const POSTAL = 1\nexport function PUTTER() {}',
+  'renamed away': 'export { POST as legacyPost }',
+  'not exported': 'async function POST() {}\nexport async function GET() {}',
+}
+for (const [shape, src] of Object.entries(NOT_WRITES)) {
+  test(`not a write route: ${shape}`, () => assert.equal(isWriteRoute(src), false, src))
+}
+
+test('a route exported in a newly detected shape is held to announcing', () => {
+  const root = app({ 'src/app/api/photos/arrow/route.ts': 'export const POST = async () => new Response()' })
+  try {
+    const r = checkRouteCoverage({ ...opts(root), quietRoutes: { '/api/photos/[id]': 'x' } })
+    assert.ok(r.checked.includes('/api/photos/arrow'))
+    assert.deepEqual(r.silent, ['/api/photos/arrow'])
   } finally { rmSync(root, { recursive: true, force: true }) }
 })

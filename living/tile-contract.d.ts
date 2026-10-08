@@ -26,3 +26,6 @@ export function checkRouteCoverage(o: {
   exempt?: (path: string) => boolean
   ignoreLibs?: readonly string[]
 }): { checked: string[]; silent: string[]; stale: string[] }
+
+/** True when a route file exports a POST, PATCH or PUT handler in any shape, ignoring comments and strings. */
+export function isWriteRoute(src: string): boolean
