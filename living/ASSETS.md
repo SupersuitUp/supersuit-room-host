@@ -13,12 +13,15 @@ command to its own `living:check`.
 
 ## The three duties
 
-1. **After an upload is finalized, call `indexAsset`.** Do it inside next/server `after()`, so the
-   response is not held up and a slow index never fails an upload.
+1. **After an upload is finalized, call `indexById(host, id)`.** Do it inside next/server `after()`,
+   so the response is not held up and a slow index never fails an upload. `indexById` re-reads the
+   asset after writing, so a hide or unshare that lands mid-index cannot leave a wider entry.
 2. **Mount `assetSearchHandlers`** at `src/app/api/asset-search/route.ts`. That is the one route
    the app's search box talks to.
-3. **When an asset is deleted, call `forgetAsset`.** Otherwise search keeps finding a thing that
-   no longer exists.
+3. **When an asset is deleted, hidden or made more private, `await forgetAsset` before answering.**
+   Catch and log it so it never fails the request, then re-index for the narrower audience in
+   `after()`. Back it with an hourly pass that forgets any entry wider than its asset now allows,
+   and re-check each search hit against the live record before showing it.
 
 The package README has the exact calls and options.
 
