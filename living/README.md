@@ -31,6 +31,10 @@ living-template-template      this repository: the machinery, nothing else
 - **No real person's name, address or domain outside `tailor/`.** `living/private-words.mjs`
   fails the check if one appears. A template forbids its apps' names by fingerprint, so it
   never has to contain them.
+- **Every app lives on a home screen.** No browser back button and no zoom into a field: every
+  screen below the home has a Back control to its parent, and no input renders under 16px
+  ([SUPER-APP.md](SUPER-APP.md), rules 10 and 11). `node living/home-screen-contract.mjs` checks
+  it, and a template puts that command in its own `living:check`.
 - **A template pins its modules; an app never picks one.** A module is a package the template
   declares in `package.json` `living.modules` (exact names or `@scope/*`; default every
   `@supersuit/*` package), best declared with `^`. Each night, for a repository registered as a
@@ -57,6 +61,7 @@ living-template-template      this repository: the machinery, nothing else
 | `node living/bump.mjs [--repo P] [--dry-run] [--allow-major <name>]... [--json]` | For a template: take each module's newest version inside its declared range, check, publish only if green; hold anything outside the range. Exit 0, 2 blocked, 1 crashed. |
 | `node living/divergence.mjs` | (library) Parent files this copy changed on purpose, with what the parent changed there since. |
 | `node living/private-words.mjs [--repo P]` | Fail if a private word appears outside `tailor/`. `--add <word>...` fingerprints words into `tailor/forbidden.sha256`. |
+| [SUPER-APP.md](SUPER-APP.md), `node living/home-screen-contract.mjs [--repo P] [--config F]` | Fail if a screen below the home has no Back control, or an input, textarea or select can render under 16px (iOS zooms into it). Declarations and exemptions in the app's `home-screen.json`. Exit 0 clean, 1 problems, 2 bad arguments or config. Library: `checkHomeScreen({ repo, ...config })`. |
 | [ASSETS.md](ASSETS.md), `node living/asset-contract.mjs [--repo P]` | Fail if a file under `src/` writes uploaded media without reaching `@supersuit/asset-index` or carrying `asset-index: exempt <reason>`. Exit 0 clean, 1 problems, 2 bad arguments. Library: `checkAssetIndexing({ repo })`. |
 | `node living/new-template.mjs <dir>` | A new living template from this repository. |
 | `node living/new-app.mjs <dir> --from <template> --template-checkout <path> --word <w>...` | A new tailored app from a template; fingerprints its private words into the template. |
