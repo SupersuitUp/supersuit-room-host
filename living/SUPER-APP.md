@@ -2,8 +2,9 @@
 
 A super app is a launcher whose tiles are small apps. Every tile in every super app made from this
 template holds to the same contract, so a new tile cannot quietly be the one that never tells anyone
-anything. The checks live in [tile-contract.mjs](tile-contract.mjs); each app supplies its own
-declarations and calls them from its own tests.
+anything. The notification checks live in [tile-contract.mjs](tile-contract.mjs); each app supplies
+its own declarations and calls them from its own tests. Rules 10 and 11, the home-screen contract,
+are checked by [home-screen-contract.mjs](home-screen-contract.mjs) from the app's `living:check`.
 
 ## The principles
 
@@ -16,6 +17,8 @@ declarations and calls them from its own tests.
 7. **Capture says it was kept.** A photo or a take is safe on the phone the moment it stops, survives a dropped connection, and the screen says plainly that it is saved.
 8. **Whatever a person can do on the phone, their agent can do from the computer**, through the tile's agent route, or the tile carries a written reason why not.
 9. **A tile that is off is gone, strangers get nothing, names stay in `tailor/`, colors come from the theme.**
+10. **Every screen below the home has an explicit Back control that returns to its parent.** The app lives on a home screen, where there is no browser back button. Back is a visible "‹ Back" at the top left, at least 44px to tap, in the theme's colors, and it goes to a fixed parent `href`. Never `history.back()` alone: a screen opened from a notification or a link has no history, and that Back goes nowhere.
+11. **No input, textarea or select ever renders below 16px.** iOS zooms the whole page into a focused field smaller than that, and a home-screen app has no easy way back out of the zoom. Keep a field looking small with the layout around it, never by shrinking its font. Never `maximum-scale=1` or `user-scalable=no` in the viewport: that kills pinch zoom, which people who need larger text depend on.
 
 **Breaking a rule on purpose is allowed, never by accident.** Every exception carries a written
 reason, and the check prints every one on every run, so a shortcut never goes quiet.
@@ -99,3 +102,56 @@ the announce pattern without announcing anything. Pass its path suffix (starting
 only `from '...'` with single quotes; a route using double quotes or a dynamic import is reported
 silent, which is the safe direction. `exempt` (default: paths ending `/upload-url`) and `announce`
 (the pattern) can be replaced when an app's conventions differ.
+
+## The home-screen contract (rules 10 and 11)
+
+`node living/home-screen-contract.mjs [--repo <path>] [--config <file>]` goes in the app's own
+`living:check`. It exits 1 and names the file for every problem, 0 when the contract holds, and 2 on
+a bad flag or an unreadable config. It checks, statically:
+
+- **Back.** Every Next.js page under `src/app` other than the home renders the app's Back component:
+  the page itself, or a module it imports (relative or `@/`) up to two imports deep. Route groups
+  `(name)` and slots `@name` are not part of the route; `_private` folders are skipped. A mention in a
+  comment or a string does not count, and `<BackRow>` is not `<Back>`.
+- **16px.** The global stylesheet gives `input`, `textarea` and `select` a font-size of at least 16px
+  (`16px`, `1rem`, or a `max()` reaching it). No stylesheet rule under `src` shrinks one of them, and
+  no `<input>`, `<textarea>` or `<select>` in a component carries `text-xs`, `text-sm`, an arbitrary
+  `text-[Npx]` under 16, or a `fontSize` under 16 (any variant prefix counts, `sm:text-sm` too).
+  Inputs that never take typed text (`type="checkbox"`, `radio`, `range`, `file`, `hidden`, buttons)
+  are left alone, and so are test files.
+
+The app's declarations live in `home-screen.json` at its root, all optional:
+
+```json
+{
+  "home": ["/"],
+  "back": "Back",
+  "exempt": { "/join": "opened from an invite link before the person is in the app; there is no parent yet" },
+  "globalCss": "src/app/globals.css"
+}
+```
+
+`home` lists the routes that are the app's home (a launcher at `/app` as well as `/`, say). `back` is
+the component's name. Every exemption needs its reason, the check prints every one on every run, and
+an exemption for a route that no longer exists is a problem. A screen that only redirects is a fair
+exemption; a screen someone can land on and read is not.
+
+The Back component itself, in each app (`src/app/components/back.tsx` is the convention):
+
+```tsx
+import Link from 'next/link'
+import { INK } from '../theme'
+
+// The way out of a screen on a home-screen app, which has no browser back button. Always a fixed
+// parent, never history.back(): a screen opened from a notification has no history.
+export function Back({ href, label = 'Back' }: { href: string; label?: string }) {
+  return (
+    <Link href={href} className="-ml-3 inline-flex min-h-11 min-w-11 items-center px-3 text-base" style={{ color: INK }}>
+      <span aria-hidden="true" className="mr-1 text-xl leading-none">‹</span>{label}
+    </Link>
+  )
+}
+```
+
+The library is `checkHomeScreen({ repo, ...config })`, built from `checkBackControls` and
+`checkInputFontSizes`, for an app that would rather call it from a test.
