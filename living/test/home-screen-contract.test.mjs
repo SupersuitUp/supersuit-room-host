@@ -199,3 +199,22 @@ test('the CLI refuses a home-screen.json it cannot read', () => withRepo({ ...BA
   assert.equal(run.status, 2)
   assert.match(run.stderr, /home-screen\.json/)
 }))
+
+test('a class name held in a constant in the same file is read', () => withRepo({
+  'src/app/globals.css': GLOBAL_OK,
+  'src/app/a.tsx': "const FIELD = 'rounded-xl p-2 text-sm'\nexport const A = () => <input className={`${FIELD} w-20`} />\n",
+  'src/app/b.tsx': "const FIELD = 'rounded-xl p-2 text-base'\nexport const B = () => <input className={FIELD} />\n",
+}, (r) => {
+  const p = checkInputFontSizes({ repo: r }).problems
+  assert.equal(p.length, 1, p.join('\n'))
+  assert.match(p[0], /^src\/app\/a\.tsx:2: .*text-sm/)
+}))
+
+test('a stylesheet class a field wears that sets under 16px is named', () => withRepo({
+  'src/app/globals.css': GLOBAL_OK + '.us-field { font-size: 15px; padding: 4px }\n.us-big { font-size: 18px }\n.label { font-size: 12px }\n',
+  'src/app/a.tsx': 'export const A = () => <div><input className="us-field" /><input className="us-big" /><span className="label" /></div>\n',
+}, (r) => {
+  const p = checkInputFontSizes({ repo: r }).problems
+  assert.equal(p.length, 1, p.join('\n'))
+  assert.match(p[0], /^src\/app\/a\.tsx:1: .*us-field.*15px/)
+}))

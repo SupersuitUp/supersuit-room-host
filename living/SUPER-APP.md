@@ -117,6 +117,8 @@ a bad flag or an unreadable config. It checks, statically:
   (`16px`, `1rem`, or a `max()` reaching it). No stylesheet rule under `src` shrinks one of them, and
   no `<input>`, `<textarea>` or `<select>` in a component carries `text-xs`, `text-sm`, an arbitrary
   `text-[Npx]` under 16, or a `fontSize` under 16 (any variant prefix counts, `sm:text-sm` too).
+  A class string kept in a `const` in the same file is read, and so is a stylesheet class the field
+  wears (`className="field"` with `.field { font-size: 15px }` is caught).
   Inputs that never take typed text (`type="checkbox"`, `radio`, `range`, `file`, `hidden`, buttons)
   are left alone, and so are test files.
 

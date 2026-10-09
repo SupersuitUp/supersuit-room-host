@@ -196,20 +196,31 @@ export function checkInputFontSizes({ repo, globalCss = 'src/app/globals.css', s
       if (!ok) problems.push(`${globalCss}: ${f} is never given a font-size of at least ${MIN_PX}px, so iOS zooms the page when one is focused. Add "input, textarea, select { font-size: ${MIN_PX}px }"`)
     }
   }
+  const smallClasses = new Map() // a class whose own rule sets under 16px -> that size
   for (const file of walk(join(root, srcDir), (n) => n.endsWith('.css'))) {
     for (const r of cssRules(readFileSync(file, 'utf8'))) {
       const size = cssFontSize(r.body)
       if (size == null || size >= MIN_PX) continue
       const hit = r.selectors.filter((s) => fieldOf(lastCompound(s)))
       if (hit.length) problems.push(`${rel(file)}:${r.line}: "${hit.join(', ')}" sets font-size ${size}px, under ${MIN_PX}px, so iOS zooms when it is focused`)
+      for (const s of r.selectors) {
+        const m = lastCompound(s).match(/^\.([\w-]+)(?:$|:)/)
+        if (m) smallClasses.set(m[1], size)
+      }
     }
   }
   for (const file of walk(join(root, srcDir), (n) => CODE_EXTS.some((e) => n.endsWith(e)) && !TEST_FILE.test(n))) {
-    for (const t of tagsIn(readFileSync(file, 'utf8'))) {
+    const src = readFileSync(file, 'utf8')
+    // Class strings kept in a constant in the same file: `const FIELD = '... text-sm'`.
+    const consts = new Map([...src.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*(['"`])([^'"`\n]*)\2/g)].map((m) => [m[1], m[3]]))
+    for (const t of tagsIn(src)) {
       const type = t.attrs.match(/\btype\s*=\s*["']([\w-]+)["']/)?.[1]
       if (t.tag === 'input' && type && NO_TEXT_TYPES.has(type)) continue
-      const small = smallSizes(t.attrs)
-      if (small.length) problems.push(`${rel(file)}:${t.line}: a ${t.tag} is ${small.join(' and ')}, under ${MIN_PX}px, so iOS zooms when it is focused. Use text-base or larger and keep the look with the layout around it`)
+      const named = [...t.attrs.matchAll(/[A-Za-z_$][\w$]*/g)].map((m) => consts.get(m[0])).filter((v) => v !== undefined)
+      const attrs = [t.attrs, ...named].join(' ')
+      const small = smallSizes(attrs)
+      for (const tok of new Set(attrs.split(/[\s"'`{}]+/))) if (smallClasses.has(tok)) small.push(`class ${tok} (${smallClasses.get(tok)}px)`)
+      if (small.length) problems.push(`${rel(file)}:${t.line}: ${t.tag === 'input' ? 'an' : 'a'} ${t.tag} is ${small.join(' and ')}, under ${MIN_PX}px, so iOS zooms when it is focused. Use text-base or larger and keep the look with the layout around it`)
     }
   }
   return { problems }
