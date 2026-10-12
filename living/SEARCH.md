@@ -15,7 +15,7 @@ Each source declares exactly one state:
 
 - `{ indexed: true }`: shared content reaches actual indexing and search.
 - `{ indexed: true, access: 'restricted' }`: private content reaches search for its permitted
-  readers and is denied to another enrolled member. Include a live-permission revocation probe.
+  readers and is denied to another enrolled member. At least one source probe must exercise a restricted record; additional probes may exercise shared records in that same source. Include live-permission revocation probes.
 - `{ notSearched: '<reason>' }`: an intentional product decision, such as an ephemeral status
   indicator with no retained content. Write the reason. Do not call missing implementation an
   intentional exclusion, and do not use privacy as a shortcut.

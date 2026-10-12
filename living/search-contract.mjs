@@ -55,6 +55,7 @@ export async function checkSearchCoverage(options) {
   if (!members.length || members.some((m) => !reason(m)) || new Set(members).size !== members.length) problems.push('search coverage needs distinct enrolled member ids')
   for (const source of sources) {
     if (decisions[source.id]?.indexed === true && !probes.some((p) => p.source === source.id)) problems.push(`indexed source "${source.id}" has no behavioral probe`)
+    if (decisions[source.id]?.access === 'restricted' && !probes.some((p) => p.source === source.id && p.readers?.length && members.some((m) => !p.readers.includes(m)))) problems.push(`source "${source.id}" private coverage needs a probe with a denied member`)
   }
   for (const p of probes) {
     const prefix = `source "${p.source}"`
@@ -62,7 +63,6 @@ export async function checkSearchCoverage(options) {
     if (![p.id, p.query, p.href].every(reason) || !p.href?.startsWith('/') || p.href === '/') problems.push(`${prefix} probe needs an id, a query from its content, and its exact item href`)
     if (!Array.isArray(p.readers) || !p.readers.length || p.readers.some((m) => !members.includes(m))) problems.push(`${prefix} probe needs permitted enrolled readers`)
     if (decisions[p.source]?.access === 'restricted') {
-      if (!members.some((m) => !p.readers?.includes(m))) problems.push(`${prefix} private probe needs a denied member`)
       if (typeof p.revoke !== 'function' || !p.revokedReaders?.length || p.revokedReaders.some((m) => !p.readers?.includes(m))) problems.push(`${prefix} private probe needs a revocation and previously permitted readers, leaving the old index in place`)
     }
   }
@@ -82,7 +82,8 @@ export async function checkSearchCoverage(options) {
       phase = 'load'
       const asset = await load(p.id)
       if (!asset || asset.id !== p.id || asset.href !== p.href) problems.push(`${prefix} loader never returns its fixture at the exact item href`)
-      if (decisions[p.source].access === 'restricted' && (!asset?.visibleTo?.length || p.readers.some((m) => !asset.visibleTo.includes(m)) || asset.visibleTo.some((m) => !p.readers.includes(m)))) problems.push(`${prefix} private loader has wider or missing reader permissions`)
+      const visibleTo = asset?.visibleTo?.length ? asset.visibleTo : members
+      if (decisions[p.source].access === 'restricted' && (p.readers.some((m) => !visibleTo.includes(m)) || visibleTo.some((m) => !p.readers.includes(m)))) problems.push(`${prefix} private loader has wider or missing reader permissions`)
       phase = 'index'
       await index(p.id)
       phase = 'search'
