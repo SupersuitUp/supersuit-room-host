@@ -36,7 +36,7 @@ Do this in order:
 4. **Create their infrastructure** as `TAILORING.md` describes, on the accounts it belongs on.
    Never put a secret in a file; secrets go in the host's environment settings.
 5. **Run the check** (`pnpm run living:check` or `npm run living:check`). It must pass,
-   including the private-words check.
+   including the private-words check and the template's search coverage integration test ([SEARCH.md](SEARCH.md)). A decision map without real indexing/search probes does not satisfy search coverage.
 6. **Give it its own remote and push:** `git remote add origin <new repo URL> && git push -u origin main`.
    Push the template checkout too, if step 2 committed fingerprints there.
 7. **Turn on updates:** `node living/install-nightly.mjs <folder>` on the machine that will own
