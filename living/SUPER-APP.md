@@ -6,6 +6,8 @@ anything. The notification checks live in [tile-contract.mjs](tile-contract.mjs)
 its own declarations and calls them from its own tests. Rules 10 and 11, the home-screen contract,
 are checked by [home-screen-contract.mjs](home-screen-contract.mjs) from the app's `living:check`.
 
+Search is part of every tile too: [SEARCH.md](SEARCH.md) requires exhaustive content-source decisions and behavioral proofs through the real search route, including private content and disabled tiles.
+
 ## The principles
 
 1. **Every app notifies.** Anything one person saves that the other can see is news, unless it is declared private to its owner, with the reason.
@@ -19,6 +21,8 @@ are checked by [home-screen-contract.mjs](home-screen-contract.mjs) from the app
 9. **A tile that is off is gone, strangers get nothing, names stay in `tailor/`, colors come from the theme.**
 10. **Every screen below the home has an explicit Back control that returns to its parent.** The app lives on a home screen, where there is no browser back button. Back is a visible "‹ Back" at the top left, at least 44px to tap, in the theme's colors, and it goes to a fixed parent `href`. Never `history.back()` alone: a screen opened from a notification or a link has no history, and that Back goes nowhere.
 11. **No input, textarea or select ever renders below 16px.** iOS zooms the whole page into a focused field smaller than that, and a home-screen app has no easy way back out of the zoom. Keep a field looking small with the layout around it, never by shrinking its font. Never `maximum-scale=1` or `user-scalable=no` in the viewport: that kills pinch zoom, which people who need larger text depend on.
+
+12. **Retained content is findable.** Each tile and content source declares indexed, intentionally not searched with a reason, or a gap that fails until explicitly accepted as reviewed debt. An indexed source proves the real list/load/index/search path; private content remains searchable only to permitted readers. See [SEARCH.md](SEARCH.md).
 
 **Breaking a rule on purpose is allowed, never by accident.** Every exception carries a written
 reason, and the check prints every one on every run, so a shortcut never goes quiet.
@@ -54,7 +58,8 @@ are on you.
    with a "has new" flag so the tile can leave the More folder when something arrives.
 7. **Item links.** If its items can be linked to, register the kind with your item-link and
    item-meta modules, so a link unfurls with no names or words in it.
-8. **Docs.** The tile and its default in `tailor/README.md`, and what it does in `README.md`.
+8. **Search.** Add every content source to the template's search inventory and decision map. Each indexed source needs a fixture through `checkSearchCoverage`, including exact item links, signed-out/unknown readers, tile OFF, and live permission narrowing for private content. A second declaration array is not proof. Unimplemented sources are failing gaps unless a review explicitly accepts their debt.
+9. **Docs.** The tile and its default in `tailor/README.md`, and what it does in `README.md`.
 
 ## How an app wires the check
 

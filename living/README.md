@@ -16,6 +16,7 @@ living-template-template      this repository: the machinery, nothing else
   requirement: one stable welcome link, private detailed change requests and bug reports,
   images/video/voice, recoverable drafts and receipts. The meta-template carries the contract;
   shared app modules and each template's adapters carry the implementation.
+- **Every retained content source is searchable or carries an explicit decision.** [SEARCH.md](SEARCH.md) defines the contract: every tile and source declares indexed, intentionally excluded with a reason, or a failing gap. `checkSearchCoverage` proves the real listing, loading, indexing, authenticated search, disabled-tile behavior and private access. A template includes that integration test in its `living:check`; declarations alone do not pass.
 - **Every upload is findable.** [ASSETS.md](ASSETS.md) defines the contract: whatever writes uploaded
   media indexes it with `@supersuit/asset-index`, or says why not. `node living/asset-contract.mjs`
   checks it, and a template puts that command in its own `living:check`.
@@ -57,6 +58,7 @@ living-template-template      this repository: the machinery, nothing else
 | Command | What it does |
 |---|---|
 | `node living/update.mjs [--repo P] [--dry-run] [--json]` | Merge the parent if it is ahead, keep `tailor/`, run `living:check`, publish only if green. Exit 0 updated or current, 2 blocked, 1 crashed. Reports divergent files. Publishes only from a checkout that is exactly origin's default branch (see below). |
+| [SEARCH.md](SEARCH.md), `search-contract.mjs` | (library) `checkSearchDecisions` and `checkSearchCoverage`: exhaustive source decisions and real behavior probes, including restricted readers and stale permissions. |
 | [SUPER-APP.md](SUPER-APP.md), `tile-contract.mjs` | (library) The notification contract every tile in a super app holds to, and the three checks an app calls from its own tests: `checkTileNews`, `checkNewsLines`, `checkRouteCoverage`. |
 | `node living/bump.mjs [--repo P] [--dry-run] [--allow-major <name>]... [--json]` | For a template: take each module's newest version inside its declared range, check, publish only if green; hold anything outside the range. Exit 0, 2 blocked, 1 crashed. |
 | `node living/divergence.mjs` | (library) Parent files this copy changed on purpose, with what the parent changed there since. |
