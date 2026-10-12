@@ -112,3 +112,23 @@ test('missing adapters fail rather than accepting a declarations-only proof', as
   assert.match(result.problems.join('\n'), /real search adapter/)
   assert.match(result.problems.join('\n'), /photos.*probe/)
 })
+
+test('a restricted source can also prove a shared record before revoking one reader', async () => {
+  const base = app()
+  // The source already has an owner-only probe; a shared subtype should not make that source
+  // impossible to test. Its stale entry must be denied after a live unshare as well.
+  const index = new Map()
+  let allowed = ['ana', 'ben']
+  base.probes.push({ source: 'notes', id: 'n2', query: 'shared parchment', href: '/notes/n2', readers: ['ana', 'ben'],
+    revoke: async () => { allowed = ['ben'] }, revokedReaders: ['ana'] })
+  const prior = { list: base.list, load: base.load, index: base.index, search: base.search, set: base.setTileEnabled }
+  let enabled = true
+  base.list = async () => [...await prior.list(), ...(enabled ? ['n2'] : [])]
+  base.load = async (id) => id === 'n2' ? enabled ? { id, href: '/notes/n2', visibleTo: [...allowed] } : null : prior.load(id)
+  base.index = async (id) => id === 'n2' ? index.set(id, true) : prior.index(id)
+  base.setTileEnabled = async (tile, on) => { if (tile === 'notes') enabled = on; await prior.set(tile, on) }
+  base.search = async (reader, query) => query === 'shared parchment'
+    ? enabled && allowed.includes(reader) && index.has('n2') ? [{ id: 'n2', href: '/notes/n2' }] : []
+    : prior.search(reader, query)
+  assert.deepEqual((await contract.checkSearchCoverage(base)).problems, [])
+})
