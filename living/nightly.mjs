@@ -10,6 +10,12 @@
 //   registry: ~/.living-template/repos.json, { "repos": ["/abs/path", ...], "templates": [...] }
 //   beside the registry: last-run.json and modules-seen.json
 //   LIVING_NOTIFY_CMD: a shell command given each report worth telling as JSON on stdin
+//   LIVING_HEARTBEAT_CMD: a shell command run after EVERY run that finished, quiet or not, given
+//   { at, repos, blocked } as JSON on stdin. It is how a job that crashed or stopped running gets
+//   noticed: point it at something that re-arms a timer (a dead man's switch), and the timer goes
+//   off when the runs stop. A job cannot report its own absence, so this is never a text.
+//   exit 0 the run finished (a blocked repository is told through LIVING_NOTIFY_CMD and the log,
+//   and is not a failure of the job), 2 usage, anything else the run itself crashed
 import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
@@ -162,8 +168,17 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   // Beside the registry, so a throwaway --registry run never overwrites the machine's real record.
   const home = dirname(registry)
   mkdirSync(home, { recursive: true })
-  writeFileSync(join(home, 'last-run.json'), JSON.stringify({ at: new Date().toISOString(), reports }, null, 2) + '\n')
+  const at = new Date().toISOString()
+  writeFileSync(join(home, 'last-run.json'), JSON.stringify({ at, reports }, null, 2) + '\n')
   if (flags.has('--json')) console.log(JSON.stringify(reports, null, 2))
   else for (const r of reports) console.log(`${new Date().toISOString()} ${r.repo}: ${r.kind === 'modules' ? 'modules ' : ''}${r.status}${r.blockedBy ? ` (${r.blockedBy.reason})` : ''}`)
-  process.exit(reports.some((r) => r.status === 'blocked') ? 2 : 0)
+  const beat = process.env.LIVING_HEARTBEAT_CMD
+  if (beat) {
+    const blocked = reports.filter((r) => r.status === 'blocked').length
+    const r = spawnSync('/bin/sh', ['-c', beat], { input: JSON.stringify({ at, repos: reports.length, blocked }), encoding: 'utf8' })
+    if (r.status !== 0) console.error(`${at} heartbeat failed: ${(r.stderr || r.stdout || '').trim()}`)
+  }
+  // 0 whenever the run finished. This used to be 2 when any repository was blocked, which made
+  // launchd show a failed job on every ordinary night and so hid a job that really was broken.
+  process.exit(0)
 }
