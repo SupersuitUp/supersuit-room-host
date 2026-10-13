@@ -19,7 +19,7 @@ Search is part of every tile too: [SEARCH.md](SEARCH.md) requires exhaustive con
 7. **Capture says it was kept.** A photo or a take is safe on the phone the moment it stops, survives a dropped connection, and the screen says plainly that it is saved.
 8. **Whatever a person can do on the phone, their agent can do from the computer**, through the tile's agent route, or the tile carries a written reason why not.
 9. **A tile that is off is gone, strangers get nothing, names stay in `tailor/`, colors come from the theme.**
-10. **Every screen below the home has an explicit Back control that returns to its parent.** The app lives on a home screen, where there is no browser back button. Back is a visible "‹ Back" at the top left, at least 44px to tap, in the theme's colors, and it goes to a fixed parent `href`. Never `history.back()` alone: a screen opened from a notification or a link has no history, and that Back goes nowhere.
+10. **Every screen below the home has an explicit Back control that returns to its parent.** The app lives on a home screen, where there is no browser back button. Back is a visible "‹ Back" at the top left, at least 44px to tap, in the theme's colors, and it goes to a fixed parent `href`. Never `history.back()` alone: a screen opened from a notification or a link has no history, and that Back goes nowhere. **And it stays in reach mid-page.** A Back drawn once at the top of a long screen scrolls away with it, and the only way out is scrolling all the way back up. So Back is either pinned to the top, or a copy floats in at the top left when the screen is scrolled back up a little and leaves when it scrolls down again or reaches the top.
 11. **No input, textarea or select ever renders below 16px.** iOS zooms the whole page into a focused field smaller than that, and a home-screen app has no easy way back out of the zoom. Keep a field looking small with the layout around it, never by shrinking its font. Never `maximum-scale=1` or `user-scalable=no` in the viewport: that kills pinch zoom, which people who need larger text depend on.
 
 12. **Retained content is findable.** Each tile and content source declares indexed, intentionally not searched with a reason, or a gap that fails until explicitly accepted as reviewed debt. An indexed source proves the real list/load/index/search path; private content remains searchable only to permitted readers. See [SEARCH.md](SEARCH.md).
@@ -118,6 +118,10 @@ a bad flag or an unreadable config. It checks, statically:
   the page itself, or a module it imports (relative or `@/`) up to two imports deep. Route groups
   `(name)` and slots `@name` are not part of the route; `_private` folders are skipped. A mention in a
   comment or a string does not count, and `<BackRow>` is not `<Back>`.
+- **Back in reach.** The Back component's own file (`src/app/components/back.tsx`, or `backFile`) draws
+  it in a layer that does not scroll away: a `sticky` bar, or a `fixed` copy shown on scrolling up. A
+  comment saying so does not count. Which of the two, and when the copy shows, is the app's to decide
+  and its own tests' to prove; a missing file is a problem.
 - **16px.** The global stylesheet gives `input`, `textarea` and `select` a font-size of at least 16px
   (`16px`, `1rem`, or a `max()` reaching it). No stylesheet rule under `src` shrinks one of them, and
   no `<input>`, `<textarea>` or `<select>` in a component carries `text-xs`, `text-sm`, an arbitrary
@@ -133,32 +137,75 @@ The app's declarations live in `home-screen.json` at its root, all optional:
 {
   "home": ["/"],
   "back": "Back",
+  "backFile": "src/app/components/back.tsx",
   "exempt": { "/join": "opened from an invite link before the person is in the app; there is no parent yet" },
   "globalCss": "src/app/globals.css"
 }
 ```
 
 `home` lists the routes that are the app's home (a launcher at `/app` as well as `/`, say). `back` is
-the component's name. Every exemption needs its reason, the check prints every one on every run, and
+the component's name and `backFile` is where it lives. Every exemption needs its reason, the check prints every one on every run, and
 an exemption for a route that no longer exists is a problem. A screen that only redirects is a fair
 exemption; a screen someone can land on and read is not.
 
-The Back component itself, in each app (`src/app/components/back.tsx` is the convention):
+The Back component itself, in each app (`src/app/components/back.tsx` is the convention), with the
+floating copy. `back-reveal.ts` beside it holds the rule as a pure function (`backReveal(state, y)`:
+past 96px, 24px up shows it, 8px down or the top hides it) with its own tests; copy both files from
+a template in the family rather than writing them again.
 
 ```tsx
+'use client'
+
 import Link from 'next/link'
-import { INK } from '../theme'
+import { useEffect, useState } from 'react'
+import { BG, HAIRLINE, INK } from '../theme'
+import { backReveal, backRevealAt } from './back-reveal'
 
 // The way out of a screen on a home-screen app, which has no browser back button. Always a fixed
-// parent, never history.back(): a screen opened from a notification has no history.
+// parent, never history.back(): a screen opened from a notification has no history. The floating
+// copy is drawn only while it shows, so a screen at rest has exactly one Back.
 export function Back({ href, label = 'Back' }: { href: string; label?: string }) {
+  const floating = useBackReveal()
   return (
-    <Link href={href} className="-ml-3 inline-flex min-h-11 min-w-11 items-center px-3 text-base" style={{ color: INK }}>
-      <span aria-hidden="true" className="mr-1 text-xl leading-none">‹</span>{label}
-    </Link>
+    <>
+      <Link href={href} className="-ml-3 inline-flex min-h-11 min-w-11 items-center px-3 text-base" style={{ color: INK }}>
+        <span aria-hidden="true" className="mr-1 text-xl leading-none">‹</span>{label}
+      </Link>
+      {floating && (
+        <Link href={href} data-floating-back
+          className="fixed left-3 z-40 inline-flex min-h-11 min-w-11 items-center rounded-full border py-1 pl-3 pr-4 text-base shadow-md"
+          style={{ top: 'calc(env(safe-area-inset-top, 0px) + 0.5rem)', color: INK, backgroundColor: BG, borderColor: HAIRLINE }}>
+          <span aria-hidden="true" className="mr-1 text-xl leading-none">‹</span>{label}
+        </Link>
+      )}
+    </>
   )
+}
+
+// Listens on the document in the capture phase, so it hears the page and also a screen that
+// scrolls inside its own tall panel; a small scroller is not the screen and is ignored.
+export function useBackReveal(): boolean {
+  const [shown, setShown] = useState(false)
+  useEffect(() => {
+    let state = backRevealAt(window.scrollY)
+    const onScroll = (e: Event) => {
+      const t = e.target
+      let y: number
+      if (t === document || t === document.documentElement || t === document.body) y = window.scrollY
+      else if (t instanceof HTMLElement && t.clientHeight >= window.innerHeight * 0.6) y = t.scrollTop
+      else return
+      state = backReveal(state, y)
+      setShown(state.shown)
+    }
+    document.addEventListener('scroll', onScroll, { capture: true, passive: true })
+    return () => document.removeEventListener('scroll', onScroll, { capture: true })
+  }, [])
+  return shown
 }
 ```
 
-The library is `checkHomeScreen({ repo, ...config })`, built from `checkBackControls` and
+An app whose Back already sits in a bar pinned to the top (`sticky top-0`) is in reach all the time
+and needs no floating copy.
+
+The library is `checkHomeScreen({ repo, ...config })`, built from `checkBackControls`, `checkBackReach` and
 `checkInputFontSizes`, for an app that would rather call it from a test.

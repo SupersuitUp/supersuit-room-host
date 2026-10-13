@@ -5,11 +5,14 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { checkBackControls, checkInputFontSizes, checkHomeScreen, routeOf, tagsIn } from '../home-screen-contract.mjs'
+import { checkBackControls, checkBackReach, checkInputFontSizes, checkHomeScreen, routeOf, tagsIn } from '../home-screen-contract.mjs'
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'home-screen-contract.mjs')
 const GLOBAL_OK = '@import "tailwindcss";\n@layer base {\n  input, textarea, select { font-size: 16px; }\n}\n'
-const BACK = "import Link from 'next/link'\nexport function Back({ href }: { href: string }) { return <Link href={href}>‹ Back</Link> }\n"
+// Drawn in place only: it scrolls away with a long screen.
+const BACK_IN_PLACE = "import Link from 'next/link'\nexport function Back({ href }: { href: string }) { return <Link href={href}>‹ Back</Link> }\n"
+// Pinned to the top, so it stays in reach mid-page.
+const BACK = "import Link from 'next/link'\nexport function Back({ href }: { href: string }) { return <div className=\"sticky top-0\"><Link href={href}>‹ Back</Link></div> }\n"
 
 function withRepo(files, fn) {
   const root = mkdtempSync(join(tmpdir(), 'home-screen-'))
@@ -217,4 +220,42 @@ test('a stylesheet class a field wears that sets under 16px is named', () => wit
   const p = checkInputFontSizes({ repo: r }).problems
   assert.equal(p.length, 1, p.join('\n'))
   assert.match(p[0], /^src\/app\/a\.tsx:1: .*us-field.*15px/)
+}))
+
+test('Back has to stay in reach mid-page: pinned or floating passes, drawn in place only is named', () => {
+  withRepo({ 'src/app/components/back.tsx': BACK }, (r) => assert.deepEqual(checkBackReach({ repo: r }).problems, []))
+  const floating = "'use client'\nexport function Back({ href }) { const up = useBackReveal(); return <><a href={href}>Back</a>{up && <a href={href} className=\"fixed left-3 z-40\">Back</a>}</> }\n"
+  withRepo({ 'src/app/components/back.tsx': floating }, (r) => assert.deepEqual(checkBackReach({ repo: r }).problems, []))
+  withRepo({ 'src/app/components/back.tsx': BACK_IN_PLACE }, (r) => {
+    const p = checkBackReach({ repo: r }).problems
+    assert.equal(p.length, 1)
+    assert.match(p[0], /^src\/app\/components\/back\.tsx: <Back> is drawn only where it sits/)
+    assert.match(p[0], /rule 10/)
+  })
+})
+
+test('a comment that says sticky or fixed is not a pinned Back', () => withRepo({
+  'src/app/components/back.tsx': '// used to be sticky, and a fixed parent is what it goes to\n/* fixed */\n' + BACK_IN_PLACE,
+}, (r) => assert.equal(checkBackReach({ repo: r }).problems.length, 1)))
+
+test('the Back file can live elsewhere when home-screen.json names it, and a missing one is a problem', () => withRepo({
+  'src/ui/back.tsx': BACK,
+}, (r) => {
+  assert.deepEqual(checkBackReach({ repo: r, backFile: 'src/ui/back.tsx' }).problems, [])
+  const p = checkBackReach({ repo: r }).problems
+  assert.equal(p.length, 1)
+  assert.match(p[0], /no such file.*"backFile" in home-screen\.json/)
+}))
+
+test('the whole contract and the CLI fail an app whose Back scrolls away', () => withRepo({
+  ...BASE,
+  'src/app/components/back.tsx': BACK_IN_PLACE,
+  'src/app/notes/page.tsx': "import { Back } from '../components/back'\nexport default function P() { return <main><Back href=\"/\" /></main> }\n",
+}, (r) => {
+  const res = checkHomeScreen({ repo: r })
+  assert.equal(res.ok, false)
+  assert.equal(res.problems.length, 1)
+  const run = spawnSync(process.execPath, [CLI, '--repo', r], { encoding: 'utf8' })
+  assert.equal(run.status, 1)
+  assert.match(run.stdout, /drawn only where it sits/)
 }))
