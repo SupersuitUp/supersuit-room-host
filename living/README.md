@@ -67,13 +67,25 @@ living-template-template      this repository: the machinery, nothing else
 | [ASSETS.md](ASSETS.md), `node living/asset-contract.mjs [--repo P]` | Fail if a file under `src/` writes uploaded media without reaching `@supersuit/asset-index` or carrying `asset-index: exempt <reason>`. Exit 0 clean, 1 problems, 2 bad arguments. Library: `checkAssetIndexing({ repo })`. |
 | `node living/new-template.mjs <dir>` | A new living template from this repository. |
 | `node living/new-app.mjs <dir> --from <template> --template-checkout <path> --word <w>...` | A new tailored app from a template; fingerprints its private words into the template. |
-| `node living/nightly.mjs` | Update every registered repository on this machine, parents first. |
-| `node living/install-nightly.mjs <repo> [--template] [--register-only] [--notify "<cmd>" \| --no-notify] [--move-job]` | Register a repository and install the 03:30 LaunchAgent (macOS). `--template` also bumps its modules each night; never use it for a tailored app. `--register-only` edits the registry and leaves the job alone. Exit 2 is a refusal, with nothing changed (an unknown flag, or a path that is not an existing git repo). |
+| `node living/nightly.mjs` | Update every registered repository on this machine, parents first. Exit 0 whenever the run finished, blocked repositories included (they are told through `LIVING_NOTIFY_CMD`); anything else means the run itself crashed. |
+| `node living/install-nightly.mjs <repo> [--template] [--register-only] [--notify "<cmd>" \| --no-notify] [--heartbeat "<cmd>"] [--move-job]` | Register a repository and install the 03:30 LaunchAgent (macOS). `--template` also bumps its modules each night; never use it for a tailored app. `--register-only` edits the registry and leaves the job alone. Exit 2 is a refusal, with nothing changed (an unknown flag, a path that is not an existing git repo, or a `HOME` that is not this user's real home folder). |
 
 `LIVING_NOTIFY_CMD` is a shell command that receives a report as JSON on stdin whenever a
 nightly run published something, was blocked, or has a newly held, refused or skipped module
 (module reports carry `"kind": "modules"`). A quiet night runs nothing, and the same held,
 refused or skipped module is told once.
+
+`LIVING_HEARTBEAT_CMD` is a shell command run after every run that finished, quiet or not, with
+`{ at, repos, blocked }` as JSON on stdin. It exists because a job cannot report its own absence:
+point it at something that re-arms a timer, and the timer goes off when the job crashes or stops
+running. `--heartbeat "<cmd>"` puts it in the plist; a re-run keeps the one already there, and an
+empty one removes it. With no heartbeat a dead job is silent, and the installer says so.
+
+**The job is one per user, whatever `HOME` says.** launchd holds a single job under this label, so
+a full install run with `HOME` pointed somewhere else would replace the real job with one that logs
+into that folder and has lost its notify command. The installer refuses that (exit 2, nothing
+written). The plist starts node by a path an upgrade keeps (`/opt/homebrew/bin/node`) when one on
+`PATH` is the same binary, never by Homebrew's versioned folder.
 
 **Adding a repository to a machine whose job already runs: `--register-only`.** The job runs every
 registered repository, so a new one needs only the registry line:

@@ -2,9 +2,9 @@
 // registry, plist path and loader, so nothing here can touch ~/.living-template or the LaunchAgent.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs'
+import { writeFileSync, readFileSync, existsSync, mkdirSync, symlinkSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
-import { plist, parseArgs, readJob, planJob, install } from '../install-nightly.mjs'
+import { plist, parseArgs, readJob, planJob, install, stableNode } from '../install-nightly.mjs'
 import { tmp, cleanup } from './helpers.mjs'
 
 const LIVE = '/live/living/nightly.mjs'
@@ -13,17 +13,18 @@ const always = () => true
 const never = () => false
 
 test('parseArgs reads every flag in any order, and takes notify from the environment when no flag is given', () => {
-  assert.deepEqual(parseArgs(['/r', '--template', '--notify', 'say hi'], {}), { repo: '/r', notify: 'say hi', template: true, registerOnly: false, noNotify: false, moveJob: false })
-  assert.deepEqual(parseArgs(['--notify', 'x', '/r'], {}), { repo: '/r', notify: 'x', template: false, registerOnly: false, noNotify: false, moveJob: false })
-  assert.deepEqual(parseArgs(['--register-only', '/r', '--template'], {}), { repo: '/r', notify: undefined, template: true, registerOnly: true, noNotify: false, moveJob: false })
-  assert.deepEqual(parseArgs(['/r', '--no-notify', '--move-job'], { LIVING_NOTIFY_CMD: 'env' }), { repo: '/r', notify: 'env', template: false, registerOnly: false, noNotify: true, moveJob: true })
+  assert.deepEqual(parseArgs(['/r', '--template', '--notify', 'say hi'], {}), { repo: '/r', notify: 'say hi', heartbeat: undefined, template: true, registerOnly: false, noNotify: false, moveJob: false })
+  assert.deepEqual(parseArgs(['--notify', 'x', '/r'], {}), { repo: '/r', notify: 'x', heartbeat: undefined, template: false, registerOnly: false, noNotify: false, moveJob: false })
+  assert.deepEqual(parseArgs(['--register-only', '/r', '--template'], {}), { repo: '/r', notify: undefined, heartbeat: undefined, template: true, registerOnly: true, noNotify: false, moveJob: false })
+  assert.deepEqual(parseArgs(['/r', '--no-notify', '--move-job'], { LIVING_NOTIFY_CMD: 'env' }), { repo: '/r', notify: 'env', heartbeat: undefined, template: false, registerOnly: false, noNotify: true, moveJob: true })
   assert.equal(parseArgs(['/r'], { LIVING_NOTIFY_CMD: 'from env' }).notify, 'from env')
   assert.equal(parseArgs(['/r'], {}).notify, undefined)
 })
 
 test('readJob reads the script and the notify command back out of a plist, unescaped', () => {
-  assert.deepEqual(readJob(job()), { script: LIVE, notify: 'notify && say' })
-  assert.deepEqual(readJob(job({ notify: null })), { script: LIVE, notify: null })
+  assert.deepEqual(readJob(job()), { script: LIVE, notify: 'notify && say', heartbeat: null })
+  assert.deepEqual(readJob(job({ notify: null })), { script: LIVE, notify: null, heartbeat: null })
+  assert.deepEqual(readJob(job({ heartbeat: 'beat "$(date)" && ok' })), { script: LIVE, notify: 'notify && say', heartbeat: 'beat "$(date)" && ok' })
   assert.equal(readJob('not a plist'), null)
 })
 
@@ -66,8 +67,8 @@ test('a plist that cannot be read is never overwritten on a guess', () => {
 })
 
 test('a first install, with no plist yet, uses this copy and whatever notify was given', () => {
-  assert.deepEqual(planJob({ existing: null, notify: 'n', script: LIVE, exists: always }), { notify: 'n', script: LIVE, notes: [] })
-  assert.deepEqual(planJob({ existing: null, notify: undefined, script: LIVE, exists: always }), { notify: null, script: LIVE, notes: [] })
+  assert.deepEqual(planJob({ existing: null, notify: 'n', script: LIVE, exists: always }), { notify: 'n', heartbeat: null, script: LIVE, notes: [] })
+  assert.deepEqual(planJob({ existing: null, notify: undefined, script: LIVE, exists: always }), { notify: null, heartbeat: null, script: LIVE, notes: [] })
 })
 
 function sandbox() {
@@ -107,7 +108,7 @@ test('a plain re-run keeps the live notify command and script, and reloads', () 
     writeFileSync(s.plistFile, job())
     const r = install({ ...s.opts, script: '/elsewhere/living/nightly.mjs', argv: ['/a/template', '--template'] })
     assert.equal(r.code, 0)
-    assert.deepEqual(readJob(readFileSync(s.plistFile, 'utf8')), { script: LIVE, notify: 'notify && say' })
+    assert.deepEqual(readJob(readFileSync(s.plistFile, 'utf8')), { script: LIVE, notify: 'notify && say', heartbeat: null })
     assert.deepEqual(s.loads, [s.plistFile])
   } finally { cleanup(s.base) }
 })
@@ -123,4 +124,56 @@ test('a refused re-run exits 2 and leaves the registry, the plist and the job as
     assert.equal(existsSync(s.registry), false)
     assert.deepEqual(s.loads, [])
   } finally { cleanup(s.base) }
+})
+
+test('a re-run keeps the heartbeat command already in the plist; a given one replaces it, an empty one removes it', () => {
+  const existing = readJob(job({ heartbeat: 'beat' }))
+  assert.equal(planJob({ existing, script: LIVE, exists: always }).heartbeat, 'beat')
+  assert.equal(planJob({ existing, heartbeat: 'new', script: LIVE, exists: always }).heartbeat, 'new')
+  assert.equal(planJob({ existing, heartbeat: '', script: LIVE, exists: always }).heartbeat, null)
+  assert.equal(parseArgs(['/r', '--heartbeat', 'b'], {}).heartbeat, 'b')
+  assert.equal(parseArgs(['/r'], { LIVING_HEARTBEAT_CMD: 'from env' }).heartbeat, 'from env')
+})
+
+test('a full install writes the heartbeat command into the plist the job is loaded from', () => {
+  const s = sandbox()
+  try {
+    const r = install({ ...s.opts, argv: ['/a/template', '--notify', 'n', '--heartbeat', 'beat'] })
+    assert.equal(r.code, 0, r.err)
+    assert.deepEqual(readJob(readFileSync(s.plistFile, 'utf8')), { script: LIVE, notify: 'n', heartbeat: 'beat' })
+  } finally { cleanup(s.base) }
+})
+
+// launchd keeps one job per user under this label. On 2026-10-01 a run with HOME pointed at a
+// test's throwaway folder replaced the real loaded job with one that logged into that folder and
+// carried no notify command, and it ran that way for twelve nights.
+test('a full install under a HOME that is not the real home is refused: no plist, no registry, no load', () => {
+  const s = sandbox()
+  try {
+    const r = install({ ...s.opts, home: join(s.base, 'home'), realHome: '/Users/someone', argv: ['/a/template', '--notify', 'n'] })
+    assert.equal(r.code, 2)
+    assert.match(r.err, /HOME/)
+    assert.equal(existsSync(s.plistFile) || existsSync(s.registry), false)
+    assert.deepEqual(s.loads, [])
+    const reg = install({ ...s.opts, home: join(s.base, 'home'), realHome: '/Users/someone', argv: ['/a/template', '--register-only'] })
+    assert.equal(reg.code, 0)
+  } finally { cleanup(s.base) }
+})
+
+test('the job is started with a node path an upgrade keeps, when one on PATH is the same binary', () => {
+  const base = tmp('node')
+  try {
+    const cellar = join(base, 'Cellar', 'node', '1.2.3', 'bin')
+    const bin = join(base, 'bin')
+    const other = join(base, 'other')
+    for (const d of [cellar, bin, other]) mkdirSync(d, { recursive: true })
+    writeFileSync(join(cellar, 'node'), '')
+    writeFileSync(join(other, 'node'), '')
+    symlinkSync(join(cellar, 'node'), join(bin, 'node'))
+    const versioned = realpathSync(join(cellar, 'node'))
+    assert.equal(stableNode(versioned, [other, bin].join(':')), join(bin, 'node'))
+    assert.equal(stableNode(versioned, [other, cellar].join(':')), versioned)
+    assert.equal(stableNode(versioned, ''), versioned)
+    assert.equal(stableNode(join(base, 'gone'), bin), join(base, 'gone'))
+  } finally { cleanup(base) }
 })

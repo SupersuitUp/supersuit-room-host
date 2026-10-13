@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { orderParentsFirst, nightly, register, freshNews, remember } from '../nightly.mjs'
 import { plist } from '../install-nightly.mjs'
@@ -299,10 +299,45 @@ test('the CLI writes last-run.json beside the registry it was given, never in th
     writeFileSync(registry, JSON.stringify({ repos: [] }))
     const home = join(base, 'home')
     const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'nightly.mjs')
-    execFileSync(process.execPath, [script, '--registry', registry], { env: { ...process.env, HOME: home, LIVING_NOTIFY_CMD: '' }, encoding: 'utf8' })
+    execFileSync(process.execPath, [script, '--registry', registry], { env: { ...process.env, HOME: home, LIVING_NOTIFY_CMD: '', LIVING_HEARTBEAT_CMD: '' }, encoding: 'utf8' })
     const run = JSON.parse(readFileSync(join(base, 'reg', 'last-run.json'), 'utf8'))
     assert.deepEqual(run.reports, [])
     assert.equal(existsSync(join(home, '.living-template')), false)
+  } finally { cleanup(base) }
+})
+
+// launchd shows the job's last exit code. A blocked repository is told through the notify command;
+// if it also failed the job, every ordinary night would look broken and a broken job would not.
+test('the CLI exits 0 when a run finished with a blocked repository, and runs the heartbeat with the count', () => {
+  const base = tmp('cli')
+  try {
+    const registry = join(base, 'reg', 'repos.json')
+    mkdirSync(dirname(registry))
+    const repo = join(base, 'app')
+    mkdirSync(repo)
+    sh(repo, 'init', '-q')
+    sh(repo, 'remote', 'add', 'template', join(base, 'no-such-template'))
+    writeFileSync(registry, JSON.stringify({ repos: [repo] }))
+    const beat = join(base, 'beat.json')
+    const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'nightly.mjs')
+    const r = spawnSync(process.execPath, [script, '--registry', registry], { env: { ...process.env, HOME: join(base, 'home'), LIVING_NOTIFY_CMD: '', LIVING_HEARTBEAT_CMD: `cat > "${beat}"` }, encoding: 'utf8' })
+    assert.match(r.stdout, /blocked/)
+    assert.equal(r.status, 0, r.stderr)
+    const run = JSON.parse(readFileSync(join(base, 'reg', 'last-run.json'), 'utf8'))
+    assert.deepEqual(JSON.parse(readFileSync(beat, 'utf8')), { at: run.at, repos: 1, blocked: 1 })
+  } finally { cleanup(base) }
+})
+
+test('a heartbeat command that fails is said in the log and does not fail the run', () => {
+  const base = tmp('cli')
+  try {
+    const registry = join(base, 'reg', 'repos.json')
+    mkdirSync(dirname(registry))
+    writeFileSync(registry, JSON.stringify({ repos: [] }))
+    const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'nightly.mjs')
+    const r = spawnSync(process.execPath, [script, '--registry', registry], { env: { ...process.env, HOME: join(base, 'home'), LIVING_NOTIFY_CMD: '', LIVING_HEARTBEAT_CMD: 'echo no-such-timer >&2; exit 3' }, encoding: 'utf8' })
+    assert.equal(r.status, 0)
+    assert.match(r.stderr, /heartbeat failed: no-such-timer/)
   } finally { cleanup(base) }
 })
 
