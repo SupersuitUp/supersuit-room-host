@@ -3,6 +3,8 @@ export interface HomeScreenConfig {
   home?: readonly string[]
   /** The Back component's name. Default 'Back'. */
   back?: string
+  /** The Back component's file, relative to the repo. Default 'src/app/components/back.tsx'. */
+  backFile?: string
   /** Route -> why it has no Back. An empty reason, or a route with no screen, is a problem. */
   exempt?: Record<string, string>
   /** Relative to the repo. Default 'src/app'. */
@@ -35,6 +37,9 @@ export function checkBackControls(o: {
   stale: string[]
   problems: string[]
 }
+
+/** The Back component draws itself pinned (`sticky`) or floating (`fixed`), so it stays in reach mid-page. */
+export function checkBackReach(o: { repo: string; backFile?: string; back?: string }): { problems: string[] }
 
 export function checkInputFontSizes(o: { repo: string; globalCss?: string; srcDir?: string }): { problems: string[] }
 

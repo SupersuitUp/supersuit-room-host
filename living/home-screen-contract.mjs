@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 // THE HOME-SCREEN CONTRACT. Every app made from this family is saved to a phone's home screen,
 // where there is no browser back button and iOS zooms the page into any field under 16px. So:
-// every screen below the home renders the app's Back control, and no input, textarea or select
-// ever renders below 16px. Static checks, no parser and no dependencies. Rules: living/SUPER-APP.md.
+// every screen below the home renders the app's Back control, that control stays in reach
+// mid-page (pinned, or floated in when the screen is scrolled back up), and no input, textarea or
+// select ever renders below 16px. Static checks, no parser and no dependencies. Rules: living/SUPER-APP.md.
 //
 //   node living/home-screen-contract.mjs [--repo <path>] [--config <file>]
 //   exit 0 clean, 1 problems, 2 bad arguments or an unreadable config
 //   config (default <repo>/home-screen.json, optional):
-//     { "home": ["/"], "back": "Back", "exempt": { "/route": "why it has no Back" },
+//     { "home": ["/"], "back": "Back", "backFile": "src/app/components/back.tsx",
+//       "exempt": { "/route": "why it has no Back" },
 //       "appDir": "src/app", "globalCss": "src/app/globals.css", "depth": 2 }
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve, dirname, relative, sep } from 'node:path'
@@ -226,11 +228,31 @@ export function checkInputFontSizes({ repo, globalCss = 'src/app/globals.css', s
   return { problems }
 }
 
-export function checkHomeScreen({ repo, appDir = 'src/app', home, back, exempt, globalCss, depth }) {
+// Line and block comments removed, strings kept: the class names this reads live in strings.
+function withoutComments(src) {
+  return src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:'"`])\/\/[^\n]*/g, '$1')
+}
+
+// A Back drawn once at the top of a long screen scrolls away with it, and the only way to it is
+// scrolling all the way back up (asked for 2026-10-12). So the Back component has to draw itself
+// in a layer that does not scroll away: a bar pinned to the top (`sticky`), or a copy floated in
+// when the screen is scrolled back up (`fixed`). Either class in the component's own file is the
+// evidence; which of the two, and when it shows, is the app's to decide and its own tests' to prove.
+export function checkBackReach({ repo, backFile = 'src/app/components/back.tsx', back = 'Back' }) {
+  const file = join(repo, backFile)
+  if (!existsSync(file)) {
+    return { problems: [`${backFile}: no such file, so nothing shows that <${back}> stays in reach mid-page. Keep the Back component there, or name its file as "backFile" in home-screen.json`] }
+  }
+  if (/\b(sticky|fixed)\b/.test(withoutComments(readFileSync(file, 'utf8')))) return { problems: [] }
+  return { problems: [`${backFile}: <${back}> is drawn only where it sits, so on a long screen it scrolls away and the way out is all the way back at the top. Pin it (a "sticky" bar), or float a copy when the screen is scrolled back up (a "fixed" link): see living/SUPER-APP.md rule 10`] }
+}
+
+export function checkHomeScreen({ repo, appDir = 'src/app', home, back, backFile, exempt, globalCss, depth }) {
   const root = resolve(repo)
   const b = checkBackControls({ repo: root, appDir: join(root, appDir), home, back, exempt, depth })
   const f = checkInputFontSizes({ repo: root, globalCss })
-  const problems = [...b.problems, ...f.problems]
+  const r = checkBackReach({ repo: root, backFile, back })
+  const problems = [...b.problems, ...r.problems, ...f.problems]
   return { ok: problems.length === 0, problems, exempted: b.exempted, checked: b.checked }
 }
 
@@ -247,5 +269,5 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   for (const p of r.problems) console.log(p)
   for (const [route, why] of r.exempted) console.log(`exempt ${route}: ${why}`)
   if (!r.ok) { console.error(`${r.problems.length} home-screen problem(s). See living/SUPER-APP.md.`); process.exit(1) }
-  console.log(`home-screen contract holds: ${r.checked.length} screen(s) below the home have Back or a reason, and no field is under ${MIN_PX}px`)
+  console.log(`home-screen contract holds: ${r.checked.length} screen(s) below the home have Back or a reason, Back stays in reach mid-page, and no field is under ${MIN_PX}px`)
 }
