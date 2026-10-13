@@ -15,7 +15,9 @@ living-template-template      this repository: the machinery, nothing else
 - **Every app has a welcome and feedback flow.** [FEEDBACK.md](FEEDBACK.md) defines the delivery
   requirement: one stable welcome link, private detailed change requests and bug reports,
   images/video/voice, recoverable drafts and receipts. The meta-template carries the contract;
-  shared app modules and each template's adapters carry the implementation.
+  shared app modules and each template's adapters carry the implementation. The module is
+  `@supersuit/suggest-a-change`, and `npx suggest-a-change-check --strict` in a template's own
+  check is what proves every screen carries the entry.
 - **Every retained content source is searchable or carries an explicit decision.** [SEARCH.md](SEARCH.md) defines the contract: every tile and source declares indexed, intentionally excluded with a reason, or a failing gap. `checkSearchCoverage` proves the real listing, loading, indexing, authenticated search, disabled-tile behavior and private access. A template includes that integration test in its `living:check`; declarations alone do not pass.
 - **Every upload is findable.** [ASSETS.md](ASSETS.md) defines the contract: whatever writes uploaded
   media indexes it with `@supersuit/asset-index`, or says why not. `node living/asset-contract.mjs`
