@@ -22,6 +22,8 @@ Do this in order:
    Read `living/FEEDBACK.md` too: every delivered app needs one welcome link and private
    feedback/change requests with images, video and voice. A template missing those capabilities
    needs an integration in its source before it can be delivered as satisfying the contract.
+   The integration is the module `@supersuit/suggest-a-change`, and the proof is
+   `npx suggest-a-change-check --strict` passing in the template's own check.
 2. **Create the copy:**
    `node living/new-app.mjs <folder> --from <template URL> --template-checkout <local template checkout, if you have one> --word "<each name>" --word "<their domain>"`.
    Every private word (names, email domains, the app's address) is fingerprinted into the

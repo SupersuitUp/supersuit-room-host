@@ -36,6 +36,26 @@ claim that existing templates already support it.
 - Give a receipt after durable acceptance and a way to see the submitter's own reports and
   status. Do not claim delivery while a report exists only on the device.
 
+## What satisfies this contract
+
+The shared implementation is one module, `@supersuit/suggest-a-change`
+(github.com/SupersuitUp/suggest-a-change). It carries the entry every screen shows (Suggest a
+change), the sheet, the receipt, a person's own list, the report contract, the hosted handlers
+and a store conformance suite. A template adopts it; it does not write its own.
+
+What proves a template holds to it is the module's own command, run from the template's check
+script:
+
+```bash
+npx suggest-a-change-check --strict
+```
+
+It fails when a screen is not under a layout that renders the entry, when an exempt screen has
+no reason, when an adapter is missing, and, with `--strict`, when the adapters are still the
+stubs `npx suggest-a-change init` writes. The check lives in the module on purpose: this folder
+is copied whole into every template, and one more file here is one more copy to keep identical.
+A template is covered when that command is in its `living:check` and green, and not before.
+
 ## Tailoring and verification
 
 The template owns the shared implementation and its checks. The tailored app supplies its
