@@ -71,3 +71,26 @@ test('publish refuses unless npm is pointed at this throwaway registry', async (
     reg.close(); cleanup(base)
   }
 })
+
+// `pnpm run` and `npm run` export the calling repository's own .npmrc to every script as
+// npm_config_* variables, and those outrank the throwaway config files. A template whose .npmrc
+// sets minimum-release-age made every pnpm install against the throwaway registry fail
+// (ERR_PNPM_MISSING_TIME: the fixture registry serves no publish times) the moment these tests
+// ran from inside `pnpm run living:check`, while they passed run by hand.
+test('isolateNpm drops config the calling package manager exported, so a run inside `pnpm run` is isolated too', async () => {
+  const base = tmp('registry')
+  const reg = await startRegistry(base)
+  const saved = { ...process.env }
+  try {
+    process.env.npm_config_minimum_release_age = '10080'
+    process.env.pnpm_config_verify_deps_before_run = 'false'
+    isolateNpm(base, reg)
+    assert.equal(process.env.npm_config_minimum_release_age, undefined)
+    assert.equal(process.env.pnpm_config_verify_deps_before_run, undefined)
+    assert.equal(process.env.npm_config_registry, reg.url)
+  } finally {
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k]
+    Object.assign(process.env, saved)
+    reg.close(); cleanup(base)
+  }
+})

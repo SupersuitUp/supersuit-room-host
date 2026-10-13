@@ -43,9 +43,13 @@ export async function startRegistry(base) {
 // Point every npm and pnpm this process starts at the throwaway registry, with nothing from the
 // real machine's ~/.npmrc (a scoped registry line there would send @supersuit to npmjs.org) and
 // no cache or store of the real machine's touched (pnpm's metadata cache is cache_dir).
+// Config that arrived in the environment goes too: `pnpm run` and `npm run` export the calling
+// repository's .npmrc as npm_config_* (a minimum-release-age there refuses every install from a
+// registry that serves no publish times), and the environment outranks both files above.
 export function isolateNpm(base, reg) {
   writeFileSync(join(base, 'npmrc'), '')
   writeFileSync(join(base, 'npmrc-global'), '')
+  for (const k of Object.keys(process.env)) if (/^p?npm_config_/i.test(k)) delete process.env[k]
   Object.assign(process.env, {
     npm_config_registry: reg.url,
     npm_config_userconfig: join(base, 'npmrc'),
