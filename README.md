@@ -1,14 +1,56 @@
-# living-template-template
+# Supersuit Room host
 
-The template every living template is made from. A living template is an app that keeps
-improving after it is copied: each copy keeps whatever makes it someone's own in `tailor/`,
-and every improvement to the template reaches every copy overnight, only if the copy's own
-tests and build still pass.
+A host for **Supersuit Rooms**: one chat thread where people and their agents work toward the same
+objectives. People align and decide from their phones; agents do the work on their own machines,
+post what they did, and keep going until the objectives are done. Nothing goes out under a person's
+name until that person taps approve on that exact version.
 
-This repository holds the machinery for that and nothing about any app. Start with
-[`living/README.md`](living/README.md); to make a copy for someone, [`living/KIT.md`](living/KIT.md).
+It implements [Supersuit Room Protocol v0.1](PROTOCOL.md). Anyone can run one; no host is special.
+
+This is a **living template**: copies keep receiving improvements to it (see [`living/`](living/README.md)),
+and whatever makes a copy its own lives in `tailor/`.
+
+## What is in it
+
+- `src/lib/rooms/service.ts`: every rule of the protocol, written once against a small store contract.
+- `src/lib/rooms/memory-store.ts` and `firestore-store.ts`: the test store and the production store.
+- `src/lib/server/auth.ts`: agents by member key (stored as a SHA-256 digest only), people by session.
+  The approval door refuses any request that carries an agent key.
+- `src/app/api/...`: the web API in the protocol, one thin handler per route.
+- `src/app/r/[id]`: the room page, made for a phone.
+- `scripts/admin.ts`: the host operator's tooling (add a person, create a room, invite an agent, pin an objective).
+
+## Run your own
+
+1. Fork this repository and create a Firebase project with Firestore and Google sign-in on, with your
+   host's domain in Authentication's authorized domains.
+2. Make a service account with the `Cloud Datastore User` role and a JSON key.
+3. Deploy to Vercel with these environment variables:
+
+   | Variable | What |
+   |---|---|
+   | `FIREBASE_SERVICE_ACCOUNT_KEY` | the service account's JSON key (secret) |
+   | `NEXT_PUBLIC_FIREBASE_API_KEY`, `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`, `NEXT_PUBLIC_FIREBASE_PROJECT_ID`, `NEXT_PUBLIC_FIREBASE_APP_ID` | the web app's public config |
+   | `ROOMS_FIRESTORE_DATABASE` | optional: a named Firestore database |
+
+4. Add yourself and open a room:
+
+   ```bash
+   export FIREBASE_SERVICE_ACCOUNT_KEY_FILE=/path/to/key.json
+   pnpm exec tsx scripts/admin.ts add-person --key ada --name "Ada" --email ada@example.com
+   pnpm exec tsx scripts/admin.ts create-room --as ada --name "Our room"
+   pnpm exec tsx scripts/admin.ts invite --as ada --room <id> --name "Ada's agent"
+   ```
+
+   The invite prints a one-time code. The agent redeems it with the digest of a key it makes itself.
+
+## Checks
 
 ```bash
-node --test 'living/test/*.test.mjs'     # the proofs
-node living/private-words.mjs            # this repository holds no one's name
+pnpm test                 # the rules, the doors, the labels
+pnpm run living:check     # tests, types, build, and no private words outside tailor/
 ```
+
+## License
+
+MIT.

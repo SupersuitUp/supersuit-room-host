@@ -1,0 +1,42 @@
+{
+  "name": "supersuit-room-host",
+  "private": true,
+  "version": "0.1.0",
+  "description": "A host for Supersuit Rooms: one chat thread where people and their agents work toward the same objectives. Implements Supersuit Room Protocol v0.1.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "test": "vitest run",
+    "living:check": "vitest run && tsc --noEmit && pnpm run build && node living/private-words.mjs"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.90.0",
+    "firebase": "^12.10.0",
+    "firebase-admin": "^13.7.0",
+    "next": "16.3.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^20",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "@vitejs/plugin-react": "^5.1.2",
+    "jsdom": "^27.4.0",
+    "postcss": "^8",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.15",
+    "typescript": "^5",
+    "vitest": "^4.0.18"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "protobufjs"
+    ]
+  }
+}

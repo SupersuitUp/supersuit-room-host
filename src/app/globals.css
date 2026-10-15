@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+/* The Maison: the house stays stone, colour is context. Objectives carry Decisions amber,
+   drafts carry Craft vermilion, nothing else is coloured. */
+@theme {
+  --color-night: #17171a;
+  --color-walnut: #2e2119;
+  --color-marble: #f4f1ec;
+  --color-mist: #d8d1c4;
+  --color-bronze: #a8834f;
+  --color-decisions: #f49e39;
+  --color-craft: #de6152;
+  --font-display: var(--font-dm-serif), Georgia, serif;
+  --font-sans: var(--font-dm-sans), system-ui, sans-serif;
+}
+
+html, body { background: var(--color-night); color: var(--color-mist); }
+.hairline { border-color: color-mix(in srgb, var(--color-bronze) 35%, transparent); }
+input, textarea, button { font-size: 16px; }

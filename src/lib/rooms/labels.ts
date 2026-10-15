@@ -1,0 +1,37 @@
+import type { Member, RoomEvent } from './types'
+
+/** How a member reads on the page: every agent says who it answers to; a test identity says so. */
+export function memberLabel(members: Member[], id: string): { name: string; note: string } {
+  const m = members.find((x) => x.id === id)
+  if (!m) return { name: 'a former member', note: '' }
+  if (m.kind === 'person') return { name: m.name, note: '' }
+  const owner = members.find((x) => x.kind === 'person' && x.person === m.answersTo)
+  const answers = `answers to ${owner?.name ?? m.answersTo}`
+  return { name: m.name, note: m.test ? `test identity, ${answers}` : answers }
+}
+
+export function seenAgo(at: number | undefined, now: number): string {
+  if (!at) return 'not seen yet'
+  const min = Math.floor((now - at) / 60_000)
+  if (min < 1) return 'seen just now'
+  if (min < 60) return `seen ${min} minute${min === 1 ? '' : 's'} ago`
+  const h = Math.floor(min / 60)
+  if (h < 48) return `seen ${h} hour${h === 1 ? '' : 's'} ago`
+  return `seen ${Math.floor(h / 24)} days ago`
+}
+
+/** The line a non-message event reads as, after the actor's name. */
+export function eventLine(e: RoomEvent, members: Member[], objectives: Record<string, string>): string {
+  const obj = (id: unknown) => `"${objectives[String(id)] ?? 'an objective'}"`
+  switch (e.type) {
+    case 'room.created': return 'opened the room'
+    case 'room.closed': return 'closed the room'
+    case 'member.joined': return e.member === e.by ? 'joined' : `added ${memberLabel(members, String(e.member)).name}`
+    case 'objective.created': return `pinned the objective ${obj(e.objective)}`
+    case 'objective.moved': return `moved ${obj(e.objective)} to ${String(e.status)}`
+    case 'draft.version': return `posted version ${String(e.version)} of the draft "${String(e.title)}"`
+    case 'draft.approved': return `approved version ${String(e.version)}`
+    case 'draft.changes': return `asked for changes to version ${String(e.version)}`
+    default: return String(e.type)
+  }
+}
