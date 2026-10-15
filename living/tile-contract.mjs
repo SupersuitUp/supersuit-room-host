@@ -1,6 +1,6 @@
-// THE NOTIFICATION CONTRACT FOR EVERY TILE IN EVERY SUPER APP made from this template. Generalized
-// from the Us app's notify-coverage guard (2026-10-07). Each app supplies its own declarations; this
-// file only checks them. Rules and reasons: living/SUPER-APP.md.
+// THE TILE CONTRACT FOR EVERY SUPER APP made from this template: its notifications, generalized from
+// the Us app's notify-coverage guard (2026-10-07), and since 2026-10-15 that every tile explains itself.
+// Each app supplies its own declarations; this file only checks them. Rules and reasons: living/SUPER-APP.md.
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 
@@ -25,12 +25,35 @@ export function checkNewsLines({ kinds, lineFor, name }) {
   return kinds.filter((k) => !String(lineFor(k)).startsWith(`${name} `)).map((k) => `news kind "${k}" does not start with the person: "${lineFor(k)}"`)
 }
 
+// PRINCIPLE 13: every tile explains itself, and so does the app. Each tile declares its one-line
+// purpose and an about: what it is for (the job it takes off a person's hands) and when to open it,
+// which the app shows on the tile's About sheet and on its About page. The app has that About page,
+// and the home links to it in code (a mention in a comment does not count).
+const answered = (v, max) => typeof v === 'string' && v.trim().length > 0 && v.length <= max
+export function checkTileAbout({ tiles, about, aboutHref, homeSource }) {
+  const out = []
+  for (const t of tiles) {
+    const a = about[t]
+    if (!a || typeof a !== 'object') { out.push(`tile "${t}" has no about: give it a purpose, what it is for, and when to open it`); continue }
+    if (!answered(a.purpose, 140)) out.push(`tile "${t}" has no purpose: one line, at most 140 characters`)
+    if (!answered(a.for, 300)) out.push(`tile "${t}" does not say what it is for: one or two sentences, at most 300 characters`)
+    if (!answered(a.when, 300)) out.push(`tile "${t}" does not say when to open it: one or two sentences, at most 300 characters`)
+  }
+  for (const t of Object.keys(about)) if (!tiles.includes(t)) out.push(`about for "${t}", which is not a tile`)
+  if (typeof aboutHref !== 'string' || !aboutHref.startsWith('/')) out.push('the app has no About page: name its path (aboutHref), which explains the app and lists every tile with its purpose')
+  else {
+    const code = stripCommentsAndStrings(String(homeSource ?? ''), { keepStrings: true })
+    if (![`'${aboutHref}'`, `"${aboutHref}"`, `\`${aboutHref}\``].some((q) => code.includes(q))) out.push(`the home does not link to ${aboutHref}, the app's About page`)
+  }
+  return out
+}
+
 const WRITE_METHODS = new Set(['POST', 'PATCH', 'PUT'])
 
 // Blank out comments and string/template literals, keeping newlines, so a word inside them can
 // never look like code. Parser-free on purpose: a regex literal holding a quote can confuse it,
-// which route files almost never contain.
-export function stripCommentsAndStrings(src) {
+// which route files almost never contain. `keepStrings` blanks the comments only.
+export function stripCommentsAndStrings(src, { keepStrings = false } = {}) {
   let out = '', i = 0
   const n = src.length
   const blank = (s) => s.replace(/[^\n]/g, ' ')
@@ -46,7 +69,7 @@ export function stripCommentsAndStrings(src) {
       let j = i + 1
       while (j < n && src[j] !== c) j += src[j] === '\\' ? 2 : 1
       j = Math.min(j + 1, n)
-      out += c + blank(src.slice(i + 1, j - 1)) + c; i = j
+      out += keepStrings ? src.slice(i, j) : c + blank(src.slice(i + 1, j - 1)) + c; i = j
     } else { out += c; i++ }
   }
   return out

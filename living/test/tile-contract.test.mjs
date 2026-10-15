@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { checkTileNews, checkNewsLines, checkRouteCoverage, isWriteRoute } from '../tile-contract.mjs'
+import { checkTileNews, checkNewsLines, checkRouteCoverage, checkTileAbout, isWriteRoute } from '../tile-contract.mjs'
 
 const NEWS = { photos: { announces: ['upload', 'heart'] }, agenda: { privateToOwner: 'own list' } }
 
@@ -140,4 +140,33 @@ test('a route exported in a newly detected shape is held to announcing', () => {
     assert.ok(r.checked.includes('/api/photos/arrow'))
     assert.deepEqual(r.silent, ['/api/photos/arrow'])
   } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+// Principle 13 (2026-10-15): every tile explains itself, and so does the app. Each tile declares a
+// purpose and an about (what it is for, when to open it), and the app has an About page the home links to.
+const ABOUT = {
+  photos: { purpose: 'Your shared photos.', for: 'Keeping the pictures you both took in one place.', when: 'After a day out.' },
+  agenda: { purpose: 'Your own list.', for: 'Writing down what you mean to do.', when: 'In the morning.' },
+}
+const HOME = "import Link from 'next/link'\nexport default function Home() { return <Link href=\"/about\">What is this?</Link> }"
+
+test('every tile declares a purpose and an about, and the home links to the About page', () => {
+  assert.deepEqual(checkTileAbout({ tiles: ['photos', 'agenda'], about: ABOUT, aboutHref: '/about', homeSource: HOME }), [])
+})
+
+test('a tile with no about, or a half-written one, is caught by name', () => {
+  const r = checkTileAbout({ tiles: ['photos', 'agenda', 'links'], about: { ...ABOUT, agenda: { purpose: 'Your own list.', for: 'x', when: ' ' } }, aboutHref: '/about', homeSource: HOME })
+  assert.equal(r.length, 2)
+  assert.match(r.find((x) => /links/.test(x)), /links.*no about/)
+  assert.match(r.find((x) => /agenda/.test(x)), /agenda.*when/)
+  const long = checkTileAbout({ tiles: ['photos'], about: { photos: { ...ABOUT.photos, purpose: 'p'.repeat(141) } }, aboutHref: '/about', homeSource: HOME })
+  assert.match(long[0], /photos.*purpose/)
+  const stray = checkTileAbout({ tiles: ['photos'], about: ABOUT, aboutHref: '/about', homeSource: HOME })
+  assert.match(stray[0], /agenda.*not a tile/)
+})
+
+test('the app must have an About page, and the home must link to it in code, not in a comment', () => {
+  assert.match(checkTileAbout({ tiles: ['photos'], about: { photos: ABOUT.photos }, aboutHref: '', homeSource: HOME })[0], /About page/)
+  assert.match(checkTileAbout({ tiles: ['photos'], about: { photos: ABOUT.photos }, aboutHref: '/about', homeSource: 'export default function Home() { return null } // href="/about"' })[0], /home.*\/about/)
+  assert.deepEqual(checkTileAbout({ tiles: ['photos'], about: { photos: ABOUT.photos }, aboutHref: '/about', homeSource: "const ABOUT = '/about'\nexport default () => <a href={ABOUT}>?</a>" }), [])
 })

@@ -2,7 +2,7 @@
 
 A super app is a launcher whose tiles are small apps. Every tile in every super app made from this
 template holds to the same contract, so a new tile cannot quietly be the one that never tells anyone
-anything. The notification checks live in [tile-contract.mjs](tile-contract.mjs); each app supplies
+anything. The notification checks, and the check that every tile explains itself (rule 13), live in [tile-contract.mjs](tile-contract.mjs); each app supplies
 its own declarations and calls them from its own tests. Rules 10 and 11, the home-screen contract,
 are checked by [home-screen-contract.mjs](home-screen-contract.mjs) from the app's `living:check`.
 
@@ -23,6 +23,8 @@ Search is part of every tile too: [SEARCH.md](SEARCH.md) requires exhaustive con
 11. **No input, textarea or select ever renders below 16px.** iOS zooms the whole page into a focused field smaller than that, and a home-screen app has no easy way back out of the zoom. Keep a field looking small with the layout around it, never by shrinking its font. Never `maximum-scale=1` or `user-scalable=no` in the viewport: that kills pinch zoom, which people who need larger text depend on.
 
 12. **Retained content is findable.** Each tile and content source declares indexed, intentionally not searched with a reason, or a gap that fails until explicitly accepted as reviewed debt. An indexed source proves the real list/load/index/search path; private content remains searchable only to permitted readers. See [SEARCH.md](SEARCH.md).
+
+13. **Every tile explains itself, and so does the app.** A tile's face says what is waiting in it, which tells nobody what the tile is for. So every tile declares a one-line purpose and an about: what it is for (the job it takes off a person's hands) and when to open it (the moment it earns a tap). The app shows them on a sheet a person reaches from the tile itself (press and hold, and an About entry on the tile's own screen, because a gesture nobody was told about explains nothing), and on an About page the home links to, which says what the app is and lists every tile with its purpose. Where the app knows what a tile reads and changes, that line is drawn from the tile's declared permissions, never written by hand. `checkTileAbout` in [tile-contract.mjs](tile-contract.mjs) holds the declarations and the home's link.
 
 **Breaking a rule on purpose is allowed, never by accident.** Every exception carries a written
 reason, and the check prints every one on every run, so a shortcut never goes quiet.
@@ -59,20 +61,24 @@ are on you.
 7. **Item links.** If its items can be linked to, register the kind with your item-link and
    item-meta modules, so a link unfurls with no names or words in it.
 8. **Search.** Add every content source to the template's search inventory and decision map. Each indexed source needs a fixture through `checkSearchCoverage`, including exact item links, signed-out/unknown readers, tile OFF, and live permission narrowing for private content. A second declaration array is not proof. Unimplemented sources are failing gaps unless a review explicitly accepts their debt.
-9. **Docs.** The tile and its default in `tailor/README.md`, and what it does in `README.md`.
+9. **Docs.** The tile's `about` in your app's about declarations: its purpose, what it is for and
+   when to open it, in plain words a person reads on their phone (`checkTileAbout` fails a tile without
+   one). Then the tile and its default in `tailor/README.md`, and what it does in `README.md`.
 
 ## How an app wires the check
 
-One test file in the app calls the three functions with the app's own declarations:
+One test file in the app calls the four functions with the app's own declarations:
 
 ```ts
 import { describe, it, expect } from 'vitest'
 import { join } from 'node:path'
-import { checkTileNews, checkNewsLines, checkRouteCoverage } from '../../../living/tile-contract.mjs'
+import { readFileSync } from 'node:fs'
+import { checkTileNews, checkNewsLines, checkRouteCoverage, checkTileAbout } from '../../../living/tile-contract.mjs'
 import type { TileNewsDecision } from '../../../living/tile-contract'
 import { TILES } from '../couple/schema'
 import { TILE_NEWS, QUIET_ROUTES, ACTIVITY_KINDS, tileForPath } from './notify-coverage'
 import { activityLine } from './activity'
+import { TILE_ABOUT, ABOUT_HREF } from './about'
 
 const src = join(process.cwd(), 'src')
 
@@ -93,8 +99,16 @@ describe('the tile contract', () => {
     expect(r.silent).toEqual([])
     expect(r.stale).toEqual([])
   })
+  it('every tile explains itself, and the home links to the About page', () => {
+    const homeSource = readFileSync(join(src, 'app/page.tsx'), 'utf8')
+    expect(checkTileAbout({ tiles: [...TILES], about: TILE_ABOUT, aboutHref: ABOUT_HREF, homeSource })).toEqual([])
+  })
 })
 ```
+
+`TILE_ABOUT` is a record keyed by tile, `{ purpose, for, when }`: the purpose at most 140 characters,
+the other two at most 300. The About page's path must appear in the home's source as a string, outside
+a comment.
 
 A write route is any `route.ts` that exports `POST`, `PATCH` or `PUT` in a shape Next.js accepts:
 `export (async) function`, `export const|let` (arrow, wrapped call, typed), a destructured
