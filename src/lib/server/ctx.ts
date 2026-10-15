@@ -10,6 +10,12 @@ let prod: Ctx | null = null
 export async function getCtx(): Promise<Ctx> {
   if (override) return override
   if (!prod) {
+    const { devFixtureEnabled, seedDevFixture } = await import('@/lib/rooms/dev-fixture')
+    if (devFixtureEnabled(process.env)) {
+      const { ctx, roomId } = await seedDevFixture()
+      console.log(`dev fixture: open /r/${roomId} with the cookie room-session=dev-session`)
+      return (prod = ctx)
+    }
     const { FirestoreStore } = await import('@/lib/rooms/firestore-store')
     const { getAdminDb } = await import('./firebase-admin')
     prod = { store: new FirestoreStore(getAdminDb()), now: () => Date.now() }
