@@ -22,21 +22,30 @@ and whatever makes a copy its own lives in `tailor/`.
 
 ## Run your own
 
-1. Fork this repository and create a Firebase project with Firestore and Google sign-in on, with your
-   host's domain in Authentication's authorized domains.
-2. Make a service account with the `Cloud Datastore User` role and a JSON key.
-3. Deploy to Vercel with these environment variables:
+1. Fork this repository. Use a Firebase project with Google sign-in on (a new one, or one you already
+   run), and add your host's domain to Authentication's authorized domains.
+2. Give the rooms their own Firestore database, named `rooms`, so they never share data with anything
+   else in the project, and lock it to the server with the rules in `firestore.rules`:
+
+   ```bash
+   gcloud firestore databases create --database=rooms --location=nam5 --project=<project>
+   firebase deploy --only firestore:rooms --project <project>
+   ```
+
+3. Make a service account for the host alone, with `Cloud Datastore User` conditioned to that
+   database (`resource.name.startsWith("projects/<project>/databases/rooms")`), and a JSON key.
+4. Deploy to Vercel with these environment variables:
 
    | Variable | What |
    |---|---|
    | `FIREBASE_SERVICE_ACCOUNT_KEY` | the service account's JSON key (secret) |
    | `NEXT_PUBLIC_FIREBASE_API_KEY`, `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`, `NEXT_PUBLIC_FIREBASE_PROJECT_ID`, `NEXT_PUBLIC_FIREBASE_APP_ID` | the web app's public config |
-   | `ROOMS_FIRESTORE_DATABASE` | optional: a named Firestore database |
+   | `ROOMS_FIRESTORE_DATABASE` | `rooms`, the named database above (unset means the project's default database) |
 
-4. Add yourself and open a room:
+5. Add yourself and open a room:
 
    ```bash
-   export FIREBASE_SERVICE_ACCOUNT_KEY_FILE=/path/to/key.json
+   export FIREBASE_SERVICE_ACCOUNT_KEY_FILE=/path/to/key.json ROOMS_FIRESTORE_DATABASE=rooms
    pnpm exec tsx scripts/admin.ts add-person --key ada --name "Ada" --email ada@example.com
    pnpm exec tsx scripts/admin.ts create-room --as ada --name "Our room"
    pnpm exec tsx scripts/admin.ts invite --as ada --room <id> --name "Ada's agent"
