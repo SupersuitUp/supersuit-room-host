@@ -25,16 +25,30 @@ export async function personFor(req: Request): Promise<string | null> {
  * person. A request that offers a signature is judged ONLY by it, never by a session beside it.
  */
 export async function readerFor(req: Request, roomId: string): Promise<Actor> {
-  const raw = req.headers.get('x-room-request')
-  if (raw !== null) {
-    let parsed: Record<string, unknown>
-    try { parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) } catch { throw new Refusal('the signed read could not be parsed', 401) }
-    if (!parsed || typeof parsed !== 'object') throw new Refusal('the signed read could not be parsed', 401)
-    return rooms.agentForSignedRead(await getCtx(), roomId, parsed, req.headers.get('x-room-signature') ?? '')
-  }
+  const signed = signedRequest(req)
+  if (signed) return rooms.agentForSignedRead(await getCtx(), roomId, signed.request, signed.sig)
   const person = await personFor(req)
   if (!person) throw new Refusal('sign in', 401)
   return { kind: 'person', person }
+}
+
+/** Who is fetching one attachment: a member that signed {v:1, type:'attachment.fetch', room, member, sha256, at, nonce}, else the signed-in person. */
+export async function fetcherFor(req: Request, roomId: string, sha: string): Promise<Actor> {
+  const signed = signedRequest(req)
+  if (signed) return rooms.agentForSignedFetch(await getCtx(), roomId, sha, signed.request, signed.sig)
+  const person = await personFor(req)
+  if (!person) throw new Refusal('sign in', 401)
+  return { kind: 'person', person }
+}
+
+/** The x-room-request header (base64url canonical JSON) and its x-room-signature, or null when none was offered. */
+export function signedRequest(req: Request): { request: Record<string, unknown>; sig: string } | null {
+  const raw = req.headers.get('x-room-request')
+  if (raw === null) return null
+  let parsed: unknown
+  try { parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) } catch { throw new Refusal('the signed request could not be parsed', 401) }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Refusal('the signed request could not be parsed', 401)
+  return { request: parsed as Record<string, unknown>, sig: req.headers.get('x-room-signature') ?? '' }
 }
 
 /** A signed-in person, for the read-only pages. */

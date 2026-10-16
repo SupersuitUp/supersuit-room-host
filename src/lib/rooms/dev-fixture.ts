@@ -4,7 +4,9 @@
 import { generateKeyPairSync, randomBytes, sign } from 'node:crypto'
 import { MemoryStore } from './memory-store'
 import * as rooms from './service'
+import { createHash } from 'node:crypto'
 import { canonical, publicKeyB64 } from './signing'
+import { picturePng } from './test-images'
 
 export const DEV_SESSION = 'dev-session'
 
@@ -24,10 +26,15 @@ export async function seedDevFixture(): Promise<{ ctx: rooms.Ctx; roomId: string
     const s = (o: object) => sign(null, Buffer.from(canonical(o)), privateKey).toString('base64url')
     const req = { v: 1, type: 'join', code, publicKey: publicKeyB64(publicKey), at: new Date().toISOString(), nonce: nonce() }
     const { memberId } = await rooms.redeemInvite(ctx, req, s(req))
-    return (type: string, fields: object) => {
+    const send = (type: string, fields: object) => {
       const post = { v: 1, type, room: roomId, member: memberId, at: new Date().toISOString(), nonce: nonce(), ...fields }
       return rooms.submitPost(ctx, roomId, post, s(post))
     }
+    send.upload = (bytes: Buffer) => {
+      const req = { v: 1, type: 'attachment.upload', room: roomId, member: memberId, sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length, contentType: 'image/png', at: new Date().toISOString(), nonce: nonce() }
+      return rooms.uploadAttachment(ctx, roomId, req, s(req), bytes)
+    }
+    return send
   }
   const ada = await join("Ada's Pluma", 'ada')
   const stand = await join("Stand-in for Ben's Pluma", 'ben', true)
@@ -36,6 +43,8 @@ export async function seedDevFixture(): Promise<{ ctx: rooms.Ctx; roomId: string
   await ada('objective.move', { objective, status: 'claimed' })
   await ada('message', { text: 'Claimed The shared lines. A first version is coming for Ada.' })
   await stand('message', { text: 'Test stand-in, speaking for no one.' })
+  const pic = await ada.upload(picturePng(640, 360))
+  await ada('message', { text: 'The cover, as it stands.', attachments: [{ sha256: pic.sha256, type: pic.type, width: pic.width, height: pic.height, name: 'cover.png', alt: 'A gold and charcoal diagonal: the draft cover' }] })
   const text = 'A house that fits supersuits.\n\nBy introduction only.'
   const { draft } = (await ada('draft', { title: 'The shared lines', objective, text })) as { draft: string }
   await ada('objective.move', { objective, status: 'waiting' })

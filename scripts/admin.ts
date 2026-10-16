@@ -9,6 +9,7 @@
 //   invite         --room <id> --name "Ada's Pluma" --for ada [--test]   prints a one-time, 24-hour code
 //   retire-member  --room <id> --member <a-...>                         its key stops working
 //   remove-legacy-person --room <id> --person ada                       a pre-v0.1 human member record
+//   delete-room    --room <id> --confirm <id>                          the room, its thread, attachments, keys and invites; no undo
 //
 // Objectives, drafts and decisions are not operator verbs: they are signed posts by member Plumas.
 import { readFileSync } from 'node:fs'
@@ -23,7 +24,7 @@ const { positionals: [verb], values: v } = parseArgs({
   options: {
     key: { type: 'string' }, name: { type: 'string' }, email: { type: 'string', multiple: true }, 
     room: { type: 'string' }, person: { type: 'string' }, test: { type: 'boolean' }, for: { type: 'string' },
-    member: { type: 'string' },
+    member: { type: 'string' }, confirm: { type: 'string' },
   },
 })
 
@@ -42,6 +43,16 @@ const verbs: Record<string, () => Promise<unknown>> = {
   invite: () => rooms.createInvite(ctx, 'operator', need('room'), { name: need('name'), answersTo: need('for'), test: v.test === true }),
   'retire-member': () => rooms.retireMember(ctx, need('room'), need('member')).then(() => ({ ok: true })),
   'remove-legacy-person': () => rooms.removeLegacyPerson(ctx, need('room'), need('person')).then(() => ({ ok: true })),
+  'delete-room': async () => {
+    const room = need('room')
+    if (v.confirm !== room) { console.error('delete-room removes everything in the room, attachments included, with no undo: pass --confirm <the same room id>'); process.exit(2) }
+    for (const coll of ['memberKeys', 'invites']) {
+      const s = await db.collection(coll).where('roomId', '==', room).get()
+      for (const d of s.docs) await d.ref.delete()
+    }
+    await db.recursiveDelete(db.doc(`rooms/${room}`))
+    return { deleted: room }
+  },
 }
 
 const run = verb ? verbs[verb] : undefined
