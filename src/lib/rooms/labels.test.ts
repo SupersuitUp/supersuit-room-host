@@ -1,22 +1,23 @@
 import { describe, it, expect } from 'vitest'
-import { memberLabel, seenAgo, eventLine } from './labels'
+import { memberLabel, seenAgo, eventLine, saidAtLabel } from './labels'
 import type { Member } from './types'
 
 const members: Member[] = [
-  { id: 'p-ada', kind: 'person', person: 'ada', name: 'Ada' },
-  { id: 'a-1', kind: 'agent', name: "Ada's Pluma", answersTo: 'ada', lastSeenAt: 0 },
-  { id: 'a-2', kind: 'agent', name: 'Stand-in for a partner\'s Pluma', answersTo: 'ada', test: true },
+  { id: 'a-1', kind: 'agent', name: "Ada's Pluma", answersTo: 'ada', answersToName: 'Ada', phrase: 'zebra honey camel bagel tulip', lastSeenAt: 0 },
+  { id: 'a-2', kind: 'agent', name: "Stand-in for a partner's Pluma", answersTo: 'ada', answersToName: 'Ada', test: true },
+  { id: 'a-3', kind: 'agent', name: 'Old', answersTo: 'ada', retired: true },
 ]
 
 describe('labels', () => {
-  it('names every agent with the person it answers to, and marks a test identity', () => {
-    expect(memberLabel(members, 'p-ada')).toEqual({ name: 'Ada', note: '' })
+  it('names every member with the person it answers to, and marks a test identity and a retired one', () => {
     expect(memberLabel(members, 'a-1')).toEqual({ name: "Ada's Pluma", note: 'answers to Ada' })
     expect(memberLabel(members, 'a-2')).toEqual({ name: "Stand-in for a partner's Pluma", note: 'test identity, answers to Ada' })
+    expect(memberLabel(members, 'a-3')).toEqual({ name: 'Old', note: 'retired' })
+    expect(memberLabel(members, 'host')).toEqual({ name: 'The host', note: '' })
     expect(memberLabel(members, 'a-gone')).toEqual({ name: 'a former member', note: '' })
   })
 
-  it('says how long ago an agent checked in', () => {
+  it('says how long ago a member checked in', () => {
     const now = 10 * 3_600_000
     expect(seenAgo(now - 30_000, now)).toBe('seen just now')
     expect(seenAgo(now - 5 * 60_000, now)).toBe('seen 5 minutes ago')
@@ -25,9 +26,15 @@ describe('labels', () => {
   })
 
   it('writes a line for each kind of event, with no em dash', () => {
-    const line = eventLine({ seq: 2, type: 'objective.moved', by: 'a-1', at: 0, objective: 'o1', status: 'claimed' }, members, { o1: 'Shared lines' })
-    expect(line).toBe('moved "Shared lines" to claimed')
-    expect(eventLine({ seq: 3, type: 'draft.version', by: 'a-1', at: 0, title: 'Headline', version: 2 }, members, {})).toBe('posted version 2 of the draft "Headline"')
-    expect(line).not.toMatch(/\u2014/)
+    const m = { o1: 'Shared lines' }
+    expect(eventLine({ seq: 2, type: 'objective.moved', by: 'a-1', at: 0, objective: 'o1', status: 'claimed' }, members, m)).toBe('moved "Shared lines" to claimed')
+    expect(eventLine({ seq: 3, type: 'draft.version', by: 'a-1', at: 0, title: 'Headline', version: 2 }, members, m)).toBe('posted version 2 of the draft "Headline"')
+    expect(eventLine({ seq: 4, type: 'decision', by: 'a-1', at: 0, verdict: 'approve', version: 1, owner: 'ada' }, members, m)).toBe("relayed Ada's decision: approve version 1")
+    expect(eventLine({ seq: 5, type: 'member.joined', by: 'a-2', at: 0, member: 'a-2', phrase: 'a b c d e' }, members, m)).toBe('joined, safety phrase "a b c d e"')
+    for (const t of ['decision', 'member.invited', 'member.retired', 'room.created']) expect(eventLine({ seq: 1, type: t, by: 'a-1', at: 0 }, members, m)).not.toMatch(/\u2014/)
+  })
+
+  it('shows when the human said it, in plain words', () => {
+    expect(saidAtLabel('2026-10-15T19:04:00.000Z', 'UTC')).toBe('Oct 15, 7:04 PM')
   })
 })

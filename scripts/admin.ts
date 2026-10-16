@@ -4,11 +4,13 @@
 //
 //   FIREBASE_SERVICE_ACCOUNT_KEY_FILE=<path> pnpm exec tsx scripts/admin.ts <verb> [--flags]
 //
-//   add-person    --key ada --name "Ada" --email ada@example.com [--email ...]
-//   create-room   --as ada --name "Room name"                       prints the room id
-//   add-member    --as ada --room <id> --person ben
-//   invite        --as ada --room <id> --name "Ada's Pluma" [--test] prints a one-time code
-//   pin-objective --as ada --room <id> --title "..." --owner ada --done "..."
+//   add-person     --key ada --name "Ada" --email ada@example.com [--email ...]
+//   create-room    --for ada --name "Room name"                          prints the room id
+//   invite         --room <id> --name "Ada's Pluma" --for ada [--test]   prints a one-time, 24-hour code
+//   retire-member  --room <id> --member <a-...>                         its key stops working
+//   remove-legacy-person --room <id> --person ada                       a pre-v0.1 human member record
+//
+// Objectives, drafts and decisions are not operator verbs: they are signed posts by member Plumas.
 import { readFileSync } from 'node:fs'
 import { parseArgs } from 'node:util'
 import { initializeApp, cert } from 'firebase-admin/app'
@@ -19,9 +21,9 @@ import * as rooms from '../src/lib/rooms/service'
 const { positionals: [verb], values: v } = parseArgs({
   allowPositionals: true,
   options: {
-    key: { type: 'string' }, name: { type: 'string' }, email: { type: 'string', multiple: true }, as: { type: 'string' },
-    room: { type: 'string' }, person: { type: 'string' }, test: { type: 'boolean' }, title: { type: 'string' },
-    owner: { type: 'string' }, done: { type: 'string' },
+    key: { type: 'string' }, name: { type: 'string' }, email: { type: 'string', multiple: true }, 
+    room: { type: 'string' }, person: { type: 'string' }, test: { type: 'boolean' }, for: { type: 'string' },
+    member: { type: 'string' },
   },
 })
 
@@ -32,15 +34,14 @@ try { account = JSON.parse(readFileSync(file, 'utf8')) } catch { console.error('
 const app = initializeApp({ credential: cert(account) })
 const db = process.env.ROOMS_FIRESTORE_DATABASE ? getFirestore(app, process.env.ROOMS_FIRESTORE_DATABASE) : getFirestore(app)
 const ctx: rooms.Ctx = { store: new FirestoreStore(db), now: () => Date.now() }
-const as = () => ({ kind: 'person' as const, person: need('as') })
 function need(k: keyof typeof v): string { const x = v[k]; if (typeof x !== 'string' || !x) { console.error(`--${k} is required`); process.exit(2) } return x }
 
 const verbs: Record<string, () => Promise<unknown>> = {
   'add-person': () => rooms.addPerson(ctx, { key: need('key'), name: need('name'), emails: v.email ?? [] }).then(() => ({ ok: true })),
-  'create-room': async () => ({ room: await rooms.createRoom(ctx, as(), { name: need('name') }) }),
-  'add-member': () => rooms.addPersonToRoom(ctx, as(), need('room'), need('person')).then(() => ({ ok: true })),
-  invite: () => rooms.createInvite(ctx, as(), need('room'), { name: need('name'), test: v.test === true }),
-  'pin-objective': async () => ({ objective: await rooms.createObjective(ctx, as(), need('room'), { title: need('title'), owner: need('owner'), done: need('done') }) }),
+  'create-room': async () => ({ room: await rooms.createRoom(ctx, { person: need('for'), name: need('name') }) }),
+  invite: () => rooms.createInvite(ctx, 'operator', need('room'), { name: need('name'), answersTo: need('for'), test: v.test === true }),
+  'retire-member': () => rooms.retireMember(ctx, need('room'), need('member')).then(() => ({ ok: true })),
+  'remove-legacy-person': () => rooms.removeLegacyPerson(ctx, need('room'), need('person')).then(() => ({ ok: true })),
 }
 
 const run = verb ? verbs[verb] : undefined

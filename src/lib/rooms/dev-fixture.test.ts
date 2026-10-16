@@ -9,14 +9,13 @@ describe('the development fixture', () => {
     expect(devFixtureEnabled({ NODE_ENV: 'development' })).toBe(false)
   })
 
-  it('seeds a room with objectives, two agents, a test identity and a draft awaiting its owner', async () => {
+  it('seeds a room of two Plumas (one a test identity) with objectives, a draft and a relayed decision, readable by its human', async () => {
     const { ctx, roomId } = await seedDevFixture()
     expect(await rooms.personForSession(ctx, DEV_SESSION)).toBe('ada')
     const v = await rooms.read(ctx, { kind: 'person', person: 'ada' }, roomId, 0)
     expect(v.objectives.length).toBeGreaterThan(1)
-    expect(v.members.filter((m) => m.kind === 'agent').length).toBe(2)
-    expect(v.members.some((m) => m.kind === 'agent' && m.test)).toBe(true)
-    expect(v.drafts[0].owner).toBe('ada')
-    expect(rooms.isApproved(v.drafts[0])).toBe(false)
+    expect(v.members.length).toBe(2)
+    expect(v.members.some((m) => m.test)).toBe(true)
+    expect(v.drafts[0].decisions[0].words).toBeTruthy()
   })
 })
