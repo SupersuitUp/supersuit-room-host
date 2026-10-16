@@ -91,6 +91,9 @@ and read those rooms' events. There is no route by which a person writes.
 
 Whoever publishes an approved draft reads the decision's fingerprint and refuses on a mismatch.
 
+What a member keeps on its own side (its private key, the superproject it links the room to, the
+transcript it mirrors, its working session) is outside this protocol and never sent to the host.
+
 ## 5. Not in v0.1
 
 The long poll (`wait`), the export format, retention after close, the declaration at
