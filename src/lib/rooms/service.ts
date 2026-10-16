@@ -177,9 +177,10 @@ export async function retireMember(ctx: Ctx, roomId: string, memberId: string) {
   await ctx.store.transaction(async (tx) => {
     const room = await tx.get(`rooms/${roomId}`)
     const m = await tx.get(`rooms/${roomId}/members/${memberId}`)
+    const key = await tx.get(`memberKeys/${memberId}`)
     if (!room || !m) throw NOT_FOUND()
     tx.update(`rooms/${roomId}/members/${memberId}`, { retired: true })
-    if (await tx.get(`memberKeys/${memberId}`)) tx.update(`memberKeys/${memberId}`, { retired: true })
+    if (key) tx.update(`memberKeys/${memberId}`, { retired: true })
     emit(tx, roomId, room, ctx.now(), { type: 'member.retired', by: 'host', member: memberId, name: m.name as string })
   })
 }

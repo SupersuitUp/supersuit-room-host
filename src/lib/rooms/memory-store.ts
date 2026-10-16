@@ -23,7 +23,12 @@ export class MemoryStore implements Store {
   async transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
     const writes: [string, Data, boolean][] = []
     const tx: Tx = {
-      get: (p) => this.get(p),
+      // Firestore refuses a read after any write in the same transaction; so does this, so the
+      // tests catch it rather than production (2026-10-15: retireMember did exactly that).
+      get: (p) => {
+        if (writes.length) return Promise.reject(new Error('Firestore transactions require all reads to be executed before all writes.'))
+        return this.get(p)
+      },
       set: (p, d) => { writes.push([p, d, false]) },
       update: (p, d) => { writes.push([p, d, true]) },
     }
