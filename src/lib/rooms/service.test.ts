@@ -107,6 +107,17 @@ describe('members are Plumas, each with a key made on its own Mac', () => {
     await refused(rooms.createInvite(ctx, asAgent(a), roomId, { name: 'X', answersTo: 'nobody' }), 400)
   })
 
+  it('members read back in the order they joined, though Firestore lists by random id; one stored before that order was kept comes last', async () => {
+    // Production lists a collection by document id. Until 2026-10-17 the test store listed in insertion
+    // order, so this held in tests and not in production; the shared strict double surfaced it.
+    const joined = []
+    for (const name of ['P1', 'P2', 'P3', 'P4', 'P5', 'P6']) joined.push(await join(roomId, name, 'ada'))
+    ;(ctx.store as MemoryStore).docs.set(`rooms/${roomId}/members/a-0legacy`, { kind: 'agent', name: 'Legacy', answersTo: 'ada', lastSeenAt: now })
+    const v = await rooms.read(ctx, asAgent(joined[0]), roomId, 0)
+    expect(v.members.map((m) => m.name)).toEqual(['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'Legacy'])
+    expect(v.members.some((m) => 'joinedSeq' in m)).toBe(false)
+  })
+
   it('an invite made through the signed post path returns the code to the inviter only', async () => {
     const a = await join(roomId, "Ada's Pluma", 'ada')
     const r = (await post(a, 'invite', { name: "Ben's Pluma", answersTo: 'ben' })) as { code: string }

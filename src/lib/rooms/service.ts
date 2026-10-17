@@ -15,7 +15,7 @@
 // readers 15-minute signed addresses. It enforces no limit, and declares the retention it keeps.
 import { createHash, randomBytes } from 'node:crypto'
 import { Refusal } from './refusal'
-import type { Data, Store, Tx } from './store'
+import type { Data, Doc, Store, Tx } from './store'
 import { canonical, fingerprint as keyFingerprint, isPublicKey, safetyPhrase, verifySigned } from './signing'
 import { ATTACHMENT_TYPES, imageInfo } from './images'
 import { CRC32C_B64 } from './crc32c'
@@ -137,6 +137,11 @@ function emit(tx: Tx, roomId: string, room: Data, now: number, event: Omit<RoomE
   return seq
 }
 
+// Members in the order they joined. A member written before joinedSeq existed (2026-10-17) sorts after
+// the rest, by id, which is the order Firestore gave every member until then.
+const joinOrder = (d: Data) => (typeof d.joinedSeq === 'number' ? d.joinedSeq : Infinity)
+const byJoin = (a: Doc, b: Doc) => joinOrder(a.data) - joinOrder(b.data) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+
 async function activeMemberCount(ctx: Ctx, roomId: string) {
   return (await ctx.store.list(`rooms/${roomId}/members`)).filter((m) => isAgentMember(m.data) && !m.data.retired).length
 }
@@ -201,10 +206,11 @@ export async function redeemInvite(ctx: Ctx, req: Record<string, unknown>, sig: 
     const now = ctx.now()
     tx.update(inviteRef, { redeemedAt: now })
     tx.set(`memberKeys/${memberId}`, { roomId, publicKey: req.publicKey })
-    const member: Data = { kind: 'agent', name: invite.name, answersTo: invite.answersTo, answersToName, publicKey: req.publicKey, fingerprint: fp, phrase, lastSeenAt: now }
+    const joinedSeq = emit(tx, roomId, room, now, { type: 'member.joined', by: memberId, member: memberId, name: invite.name as string, phrase })
+    // Firestore lists documents by id, and member ids are random, so join order is kept on the member.
+    const member: Data = { kind: 'agent', name: invite.name, answersTo: invite.answersTo, answersToName, publicKey: req.publicKey, fingerprint: fp, phrase, lastSeenAt: now, joinedSeq }
     if (invite.test) member.test = true
     tx.set(`rooms/${roomId}/members/${memberId}`, member)
-    emit(tx, roomId, room, now, { type: 'member.joined', by: memberId, member: memberId, name: invite.name as string, phrase })
     return { roomId, memberId, name: invite.name as string, fingerprint: fp, phrase }
   })
 }
@@ -290,7 +296,7 @@ export async function read(ctx: Ctx, actor: Actor, roomId: string, after: number
   const evs = events.map((e) => e.data as unknown as RoomEvent)
   return {
     room: { id: roomId, ...room } as unknown as Room,
-    members: members.filter((m) => isAgentMember(m.data)).map((m) => ({ id: m.id, ...m.data }) as unknown as Member),
+    members: members.filter((m) => isAgentMember(m.data)).sort(byJoin).map(({ id, data: { joinedSeq: _, ...rest } }) => ({ id, ...rest }) as unknown as Member),
     objectives: objectives.map((o) => ({ id: o.id, ...o.data }) as unknown as Objective),
     drafts: fullDrafts,
     events: evs,
