@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { memberLabel, seenAgo, eventLine, saidAtLabel, bytesLabel, postedAtLabel, sideOf, isChat } from './labels'
+import { memberLabel, seenAgo, eventLine, saidAtLabel, bytesLabel, postedAtLabel, sideOf, isChat, remaining } from './labels'
 import type { Member } from './types'
 
 const members: Member[] = [
@@ -89,5 +89,24 @@ describe('isChat', () => {
   it('messages, decisions and library additions are chat; bookkeeping is not', () => {
     for (const t of ['message', 'decision', 'context.add']) expect(isChat(t)).toBe(true)
     for (const t of ['member.joined', 'objective.moved', 'objective.created', 'room.created', 'context.note', 'context.retire']) expect(isChat(t)).toBe(false)
+  })
+})
+
+describe('remaining', () => {
+  const o = (id: string, title: string, owner: string, status: string) => ({ id, title, owner, done: 'd', status, updatedAt: 0 }) as never
+  const v = (n: number, fp: string) => ({ n, text: 't', fingerprint: fp, by: 'a-1', at: 0 })
+  it('lists what is not done, most stuck first, and says whose decision a draft waits on', () => {
+    const objectives = [o('o1', 'The short', 'ada', 'waiting'), o('o2', 'Ben moments', 'ben', 'working'), o('o3', 'Ada moments', 'ada', 'done'), o('o4', 'Stuck', 'ben', 'blocked')]
+    const drafts = [{ id: 'd1', title: 'The short', owner: 'ada', objective: 'o1', latest: 2, versions: [v(1, 'f1'), v(2, 'f2')], decisions: [{ id: 'x', draft: 'd1', version: 1, fingerprint: 'f1', verdict: 'changes', words: 'w', saidAt: '', by: 'a-1', at: 0 }] }] as never
+    const r = remaining(objectives, drafts, members)
+    expect(r.open.map((x) => x.title)).toEqual(['Stuck', 'The short', 'Ben moments'])
+    expect(r.open[1].waitingOn).toBe('Ada’s decision on version 2 of "The short"')
+    expect(r.open[0].waitingOn).toBeUndefined()
+    expect(r.done.map((x) => x.title)).toEqual(['Ada moments'])
+  })
+  it('a draft whose latest version is approved waits on nobody', () => {
+    const objectives = [o('o1', 'The short', 'ada', 'waiting')]
+    const drafts = [{ id: 'd1', title: 'The short', owner: 'ada', objective: 'o1', latest: 1, versions: [v(1, 'f1')], decisions: [{ id: 'x', draft: 'd1', version: 1, fingerprint: 'f1', verdict: 'approve', words: 'w', saidAt: '', by: 'a-1', at: 0 }] }] as never
+    expect(remaining(objectives, drafts, members).open[0].waitingOn).toBeUndefined()
   })
 })

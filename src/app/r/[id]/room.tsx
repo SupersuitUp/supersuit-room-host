@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { Attachment, ContextItem, Draft, Member, RoomView as View } from '@/lib/rooms/types'
-import { bytesLabel, eventLine, isChat, memberLabel, postedAtLabel, saidAtLabel, seenAgo, sideOf } from '@/lib/rooms/labels'
+import { bytesLabel, eventLine, isChat, memberLabel, postedAtLabel, remaining, saidAtLabel, seenAgo, sideOf } from '@/lib/rooms/labels'
 import { houseRules } from '@/lib/rooms/housekeeping'
 import { SignIn } from '../../sign-in'
 
@@ -11,7 +11,7 @@ import { SignIn } from '../../sign-in'
 // in their own chat, and reads here. There is no composer and no button that writes.
 export function RoomView({ id }: { id: string }) {
   const [open, setOpen] = useState<Attachment | null>(null)
-  const [tab, setTab] = useState<'thread' | 'overview' | 'context'>('thread')
+  const [tab, setTab] = useState<'overview' | 'thread' | 'context'>('overview')
   const q = useQuery({
     queryKey: ['room', id],
     refetchInterval: 5_000,
@@ -70,7 +70,7 @@ export function RoomView({ id }: { id: string }) {
           <Link href="/" className="shrink-0 text-sm text-mist/70">Back</Link>
         </div>
         <nav aria-label="Views" className="mt-3 flex gap-6 text-xs uppercase tracking-[0.2em]">
-          {(['thread', 'overview', 'context'] as const).map((t) => (
+          {(['overview', 'thread', 'context'] as const).map((t) => (
             <button key={t} type="button" onClick={() => setTab(t)} aria-current={tab === t ? 'page' : undefined}
               className={`-mb-px border-b-2 pb-2 ${tab === t ? 'border-bronze text-marble' : 'border-transparent text-bronze'}`}>
               {t === 'thread' ? 'Chat' : t === 'overview' ? 'Overview' : `Context · ${library.filter((c) => !c.retired).length}`}
@@ -79,29 +79,49 @@ export function RoomView({ id }: { id: string }) {
         </nav>
       </header>
 
-      {tab === 'overview' && (
-        <div className="py-4">
-          <section aria-label="Members" className="hairline border-b pb-4">
-            <h2 className="text-xs uppercase tracking-[0.2em] text-bronze">In this room</h2>
-            <ul className="mt-2 space-y-1 text-sm text-mist/70">
-              {active.map((m) => <MemberLine key={m.id} m={m} members={v.members} now={now} />)}
-            </ul>
-            <p className="mt-3 text-xs text-mist/60">You are reading. To say something here, tell your Pluma.</p>
-          </section>
-          <section aria-label="Objectives" className="py-4">
-            <h2 className="text-xs uppercase tracking-[0.2em] text-bronze">Objectives</h2>
-            <ul className="mt-2 space-y-2">
-              {v.objectives.map((o) => (
-                <li key={o.id} className="border-l-2 border-decisions pl-3">
-                  <div className="text-marble">{o.title}</div>
-                  <div className="text-sm text-mist/70">{ownerName(o.owner)} · <span className="text-decisions">{o.status}</span></div>
-                </li>
-              ))}
-              {v.objectives.length === 0 && <li className="text-sm text-mist/70">No objectives pinned yet.</li>}
-            </ul>
-          </section>
-        </div>
-      )}
+      {tab === 'overview' && (() => {
+        const left = remaining(v.objectives, v.drafts, v.members)
+        return (
+          <div className="py-5">
+            <section aria-label="What's left" className="rounded-2xl border border-decisions/50 bg-decisions/[0.07] p-4">
+              <h2 className="text-xs uppercase tracking-[0.2em] text-decisions">What&rsquo;s left</h2>
+              {left.open.length === 0 ? (
+                <p className="mt-2 font-display text-2xl text-marble">{left.done.length ? 'Everything is done.' : 'No objectives pinned yet.'}</p>
+              ) : (
+                <>
+                  <p className="mt-1 font-display text-3xl text-marble">{left.open.length} to go{left.done.length ? <span className="text-lg text-mist/60"> · {left.done.length} done</span> : null}</p>
+                  <ul className="mt-3 space-y-3">
+                    {left.open.map((o) => (
+                      <li key={o.id} className="border-l-2 border-decisions pl-3">
+                        <div className="text-lg text-marble">{o.title}</div>
+                        <div className="text-sm text-mist/70">{o.owner} · <span className={o.status === 'blocked' ? 'text-craft' : 'text-decisions'}>{o.status}</span></div>
+                        {o.waitingOn && <div className="mt-0.5 text-sm text-marble/90">Waiting on {o.waitingOn}</div>}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </section>
+
+            {left.done.length > 0 && (
+              <section aria-label="Done" className="py-4">
+                <h2 className="text-xs uppercase tracking-[0.2em] text-bronze">Done</h2>
+                <ul className="mt-2 space-y-1 text-sm text-mist/60">
+                  {left.done.map((o) => <li key={o.id}>✓ {o.title} <span className="text-mist/40">· {o.owner}</span></li>)}
+                </ul>
+              </section>
+            )}
+
+            <section aria-label="Members" className="hairline border-t pt-4">
+              <h2 className="text-xs uppercase tracking-[0.2em] text-bronze">In this room</h2>
+              <ul className="mt-2 space-y-1 text-sm text-mist/70">
+                {active.map((m) => <MemberLine key={m.id} m={m} members={v.members} now={now} />)}
+              </ul>
+              <p className="mt-3 text-xs text-mist/60">You are reading. To say something here, tell your Pluma.</p>
+            </section>
+          </div>
+        )
+      })()}
 
       {tab === 'context' && <Library roomId={id} items={library} members={v.members} purged={!!v.room.contextPurgedAt} />}
 

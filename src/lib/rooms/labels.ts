@@ -1,4 +1,4 @@
-import type { Member, RoomEvent } from './types'
+import type { Draft, Member, Objective, RoomEvent } from './types'
 
 /** How a member reads on the page: every Pluma says who it answers to; a test identity says so. */
 export function memberLabel(members: Member[], id: string): { name: string; note: string } {
@@ -85,3 +85,26 @@ export function sideOf(members: Member[], you: string, by: string): 'left' | 'ri
 
 /** Posts that read as chat bubbles; everything else is a small centered line. */
 export const isChat = (type: string) => type === 'message' || type === 'decision' || type === 'context.add'
+
+const STUCK_FIRST = ['blocked', 'waiting', 'working', 'claimed', 'open'] as const
+
+/**
+ * What the room still has to do, for the Overview: every objective not done, most stuck first, each
+ * naming whose decision it waits on when a draft for it has an undecided latest version.
+ */
+export function remaining(objectives: Objective[], drafts: Draft[], members: Member[]) {
+  const open = objectives
+    .filter((o) => o.status !== 'done')
+    .sort((a, b) => STUCK_FIRST.indexOf(a.status as never) - STUCK_FIRST.indexOf(b.status as never))
+    .map((o) => {
+      const pending = drafts.find((d) => {
+        if (d.objective !== o.id) return false
+        const latest = d.versions.find((x) => x.n === d.latest)
+        return !!latest && !d.decisions.some((x) => x.version === latest.n && x.fingerprint === latest.fingerprint)
+      })
+      const waitingOn = pending ? `${ownerName(members, pending.owner)}’s decision on version ${pending.latest} of "${pending.title}"` : undefined
+      return { id: o.id, title: o.title, owner: ownerName(members, o.owner), status: o.status, waitingOn }
+    })
+  const done = objectives.filter((o) => o.status === 'done').map((o) => ({ id: o.id, title: o.title, owner: ownerName(members, o.owner) }))
+  return { open, done }
+}
