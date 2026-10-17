@@ -1,4 +1,4 @@
-// The rules of a Supersuit Room (Protocol v0.2), written once against the Store contract.
+// The rules of a Supersuit Room (Protocol v0.3), written once against the Store contract.
 //
 // Members are Plumas only. Every write is ONE signed post (submitPost): the host verifies the
 // member's Ed25519 signature over the post's canonical JSON, refuses a replay or a stale clock,
@@ -8,17 +8,28 @@
 // v0.2 adds attachments: a member uploads image bytes under a signed request, the host reads and
 // verifies the header and keeps the bytes exactly as sent, and a post names them by sha256 inside
 // the signed body, so an attachment cannot be swapped after posting.
+//
+// v0.3 adds the context library: files of any type and any size, each with a required why. The bytes
+// never pass through this host: it opens a resumable session in the object store bound to the signed
+// size, type and crc32c, lists the item only once the store holds exactly those bytes, and hands
+// readers 15-minute signed addresses. It enforces no limit, and declares the retention it keeps.
 import { createHash, randomBytes } from 'node:crypto'
 import { Refusal } from './refusal'
 import type { Data, Store, Tx } from './store'
 import { canonical, fingerprint as keyFingerprint, isPublicKey, safetyPhrase, verifySigned } from './signing'
 import { ATTACHMENT_TYPES, imageInfo } from './images'
+import { CRC32C_B64 } from './crc32c'
+import { contextPath, contextPrefix, type ObjectStore } from './object-store'
+import { HOUSEKEEPING_DECLARATION } from './housekeeping'
+export { HOUSEKEEPING_DECLARATION }
 import {
   MAX_MEMBERS, OBJECTIVE_STATUSES,
-  type Actor, type Attachment, type Decision, type Draft, type DraftVersion, type Member, type Objective, type Room, type RoomEvent, type RoomView,
+  type Actor, type Attachment, type ContextItem, type Decision, type Draft, type DraftVersion, type Member, type Objective, type Room, type RoomEvent, type RoomView,
 } from './types'
 
-export type Ctx = { store: Store; now: () => number }
+/** objects is the object store for context bytes (v0.3); a host without one refuses context requests. */
+export type Ctx = { store: Store; now: () => number; objects?: ObjectStore }
+export type { ContextItem }
 /** Who may invite: the host operator (scripts/admin.ts) or a member Pluma. Never a person directly. */
 export type Inviter = 'operator' | Actor
 
@@ -46,8 +57,11 @@ export const fingerprintText = (text: string) => sha256(text)
  * attachments, else the SHA-256 of the canonical JSON {attachments: [their sha256s, in order], text},
  * so a decision binds the images as well as the words.
  */
-export const fingerprintVersion = (text: string, attachments: { sha256: string }[] = []) =>
-  attachments.length ? sha256(canonical({ attachments: attachments.map((a) => a.sha256), text })) : fingerprintText(text)
+export const fingerprintVersion = (text: string, attachments: { sha256: string }[] = [], context: string[] = []) =>
+  context.length ? sha256(canonical({ attachments: attachments.map((a) => a.sha256), context, text }))
+    : attachments.length ? sha256(canonical({ attachments: attachments.map((a) => a.sha256), text })) : fingerprintText(text)
+/* v0.3: a version naming context items is fingerprinted over {attachments, context, text}, with
+   attachments [] when it has none; a version with no context keeps its v0.2 fingerprint exactly. */
 const emailDigest = (email: string) => sha256(email.trim().toLowerCase())
 const newId = (prefix: string) => prefix + randomBytes(6).toString('hex')
 const pad = (seq: number) => String(seq).padStart(12, '0')
@@ -254,11 +268,12 @@ export async function read(ctx: Ctx, actor: Actor, roomId: string, after: number
     you = member.id
   }
   const room = (await ctx.store.get(`rooms/${roomId}`))!
-  const [members, objectives, drafts, events] = await Promise.all([
+  const [members, objectives, drafts, events, library] = await Promise.all([
     ctx.store.list(`rooms/${roomId}/members`),
     ctx.store.list(`rooms/${roomId}/objectives`, { orderBy: 'createdAt' }),
     ctx.store.list(`rooms/${roomId}/drafts`, { orderBy: 'createdAt' }),
     ctx.store.list(`rooms/${roomId}/events`, { after: { field: 'seq', value: Number(after) || 0 }, orderBy: 'seq', limit: 500 }),
+    ctx.store.list(`rooms/${roomId}/context`, { orderBy: 'at' }),
   ])
   const fullDrafts: Draft[] = await Promise.all(drafts.map(async (d) => {
     const [versions, decisions] = await Promise.all([
@@ -279,6 +294,7 @@ export async function read(ctx: Ctx, actor: Actor, roomId: string, after: number
     objectives: objectives.map((o) => ({ id: o.id, ...o.data }) as unknown as Objective),
     drafts: fullDrafts,
     events: evs,
+    context: library.map((c) => itemOf(c.data)),
     cursor: evs.length ? evs[evs.length - 1].seq : Math.max(Number(after) || 0, 0),
     you,
   }
@@ -286,7 +302,12 @@ export async function read(ctx: Ctx, actor: Actor, roomId: string, after: number
 
 // ---- the one write path: a signed post ----
 
-type Handler = (tx: Tx, a: { ctx: Ctx; roomId: string; room: Data; member: Member; post: Record<string, unknown>; sig: string; now: number; attachments?: Attachment[] }) => Promise<Record<string, unknown>>
+type Handler = (tx: Tx, a: {
+  ctx: Ctx; roomId: string; room: Data; member: Member; post: Record<string, unknown>; sig: string; now: number
+  attachments?: Attachment[]; context?: string[]
+  /** Work to do once the transaction has committed (deleting retired bytes), never inside it. */
+  afterCommit: (() => Promise<void>)[]
+}) => Promise<Record<string, unknown>>
 
 /** The post types that may carry attachments (v0.2). */
 const CARRIES_ATTACHMENTS = new Set(['message', 'draft', 'draft.version', 'decision'])
@@ -295,13 +316,13 @@ const CARRIES_ATTACHMENTS = new Set(['message', 'draft', 'draft.version', 'decis
 const humanOf = (m: Member) => m.answersTo
 
 const HANDLERS: Record<string, Handler> = {
-  async message(tx, { roomId, room, member, post, sig, now, attachments }) {
+  async message(tx, { roomId, room, member, post, sig, now, attachments, context }) {
     const body = attachments && (post.text === undefined || post.text === '') ? '' : text(post.text, 'message')
     for (const ref of [post.mention, post.instructionFor]) {
       if (ref !== undefined && !isAgentMember(await tx.get(`rooms/${roomId}/members/${ref}`))) throw new Refusal('that member is not in this room', 400)
     }
     if (post.objective !== undefined && !(await tx.get(`rooms/${roomId}/objectives/${post.objective}`))) throw new Refusal('no such objective', 400)
-    return { seq: emit(tx, roomId, room, now, { type: 'message', by: member.id, text: body, mention: optString(post.mention), objective: optString(post.objective), instructionFor: optString(post.instructionFor), attachments, post, sig }) }
+    return { seq: emit(tx, roomId, room, now, { type: 'message', by: member.id, text: body, mention: optString(post.mention), objective: optString(post.objective), instructionFor: optString(post.instructionFor), attachments, context, post, sig }) }
   },
 
   async objective(tx, { roomId, room, member, post, sig, now }) {
@@ -324,20 +345,20 @@ const HANDLERS: Record<string, Handler> = {
     return { objective: oid, status: post.status }
   },
 
-  async draft(tx, { roomId, room, member, post, sig, now, attachments }) {
+  async draft(tx, { roomId, room, member, post, sig, now, attachments, context }) {
     if (post.objective !== undefined && !(await tx.get(`rooms/${roomId}/objectives/${post.objective}`))) throw new Refusal('no such objective', 400)
     const id = newId('d')
     const body = text(post.text, 'draft')
     const d: Data = { title: text(post.title, 'title', 200), owner: humanOf(member), latest: 1, createdAt: now }
     if (post.objective) d.objective = post.objective
     tx.set(`rooms/${roomId}/drafts/${id}`, d)
-    const fp = fingerprintVersion(body, attachments)
-    tx.set(`rooms/${roomId}/drafts/${id}/versions/1`, withAttachments({ n: 1, text: body, fingerprint: fp, by: member.id, at: now }, attachments))
-    emit(tx, roomId, room, now, { type: 'draft.version', by: member.id, draft: id, version: 1, title: d.title as string, owner: d.owner as string, fingerprint: fp, attachments, post, sig })
+    const fp = fingerprintVersion(body, attachments, context)
+    tx.set(`rooms/${roomId}/drafts/${id}/versions/1`, withAttachments({ n: 1, text: body, fingerprint: fp, by: member.id, at: now }, attachments, context))
+    emit(tx, roomId, room, now, { type: 'draft.version', by: member.id, draft: id, version: 1, title: d.title as string, owner: d.owner as string, fingerprint: fp, attachments, context, post, sig })
     return { draft: id, version: 1 }
   },
 
-  async 'draft.version'(tx, { roomId, room, member, post, sig, now, attachments }) {
+  async 'draft.version'(tx, { roomId, room, member, post, sig, now, attachments, context }) {
     const did = String(post.draft ?? '')
     const d = await tx.get(`rooms/${roomId}/drafts/${did}`)
     if (!d) throw new Refusal('no such draft', 404)
@@ -345,9 +366,9 @@ const HANDLERS: Record<string, Handler> = {
     const n = (d.latest as number) + 1
     const body = text(post.text, 'draft')
     tx.update(`rooms/${roomId}/drafts/${did}`, { latest: n })
-    const fp = fingerprintVersion(body, attachments)
-    tx.set(`rooms/${roomId}/drafts/${did}/versions/${n}`, withAttachments({ n, text: body, fingerprint: fp, by: member.id, at: now }, attachments))
-    emit(tx, roomId, room, now, { type: 'draft.version', by: member.id, draft: did, version: n, title: d.title as string, owner: d.owner as string, fingerprint: fp, attachments, post, sig })
+    const fp = fingerprintVersion(body, attachments, context)
+    tx.set(`rooms/${roomId}/drafts/${did}/versions/${n}`, withAttachments({ n, text: body, fingerprint: fp, by: member.id, at: now }, attachments, context))
+    emit(tx, roomId, room, now, { type: 'draft.version', by: member.id, draft: did, version: n, title: d.title as string, owner: d.owner as string, fingerprint: fp, attachments, context, post, sig })
     return { draft: did, version: n }
   },
 
@@ -356,7 +377,7 @@ const HANDLERS: Record<string, Handler> = {
    * only after checking in: it carries the owner's words verbatim, the time they said them, and the
    * exact version and fingerprint they were shown.
    */
-  async decision(tx, { roomId, room, member, post, sig, now, attachments }) {
+  async decision(tx, { roomId, room, member, post, sig, now, attachments, context }) {
     const did = String(post.draft ?? '')
     const d = await tx.get(`rooms/${roomId}/drafts/${did}`)
     if (!d) throw new Refusal('no such draft', 404)
@@ -370,9 +391,50 @@ const HANDLERS: Record<string, Handler> = {
     const v = await tx.get(`rooms/${roomId}/drafts/${did}/versions/${post.version}`)
     if (!v || v.fingerprint !== post.fingerprint) throw new Refusal('the fingerprint does not match that version', 409)
     const id = newId('dc')
-    tx.set(`rooms/${roomId}/drafts/${did}/decisions/${id}`, withAttachments({ draft: did, version: post.version, fingerprint: post.fingerprint, verdict: post.verdict, words, saidAt: post.saidAt, by: member.id, at: now }, attachments))
-    emit(tx, roomId, room, now, { type: 'decision', by: member.id, draft: did, version: post.version as number, fingerprint: post.fingerprint as string, verdict: post.verdict, words, saidAt: post.saidAt as string, owner: d.owner as string, attachments, post, sig })
+    tx.set(`rooms/${roomId}/drafts/${did}/decisions/${id}`, withAttachments({ draft: did, version: post.version, fingerprint: post.fingerprint, verdict: post.verdict, words, saidAt: post.saidAt, by: member.id, at: now }, attachments, context))
+    emit(tx, roomId, room, now, { type: 'decision', by: member.id, draft: did, version: post.version as number, fingerprint: post.fingerprint as string, verdict: post.verdict, words, saidAt: post.saidAt as string, owner: d.owner as string, attachments, context, post, sig })
     return { decision: id }
+  },
+
+  // ---- the context library (v0.3, section 7) ----
+
+  /** List an item, only once the object store holds exactly the bytes signed: that size and that crc32c. */
+  async 'context.add'(tx, { ctx, roomId, room, member, post, sig, now }) {
+    const m = contextMeta(post)
+    const why = text(post.why, 'why', MAX_WHY)
+    if (post.objective !== undefined && !(await tx.get(`rooms/${roomId}/objectives/${post.objective}`))) throw new Refusal('no such objective', 400)
+    const ref = `rooms/${roomId}/context/${m.sha256}`
+    if (await tx.get(ref)) throw new Refusal('the library already lists that file', 409)
+    const held = await objectsOf(ctx).stat(contextPath(roomId, m.sha256))
+    if (!held || held.size !== m.size || held.crc32c !== m.crc32c) throw new Refusal('the store does not hold exactly those bytes for this room; upload them first', 400)
+    const item: Data = { sha256: m.sha256, crc32c: m.crc32c, size: m.size, name: m.name, contentType: m.contentType, why, from: member.id, answersTo: humanOf(member), at: now, notes: [] }
+    if (post.objective) item.objective = post.objective
+    tx.set(ref, item)
+    emit(tx, roomId, room, now, { type: 'context.add', by: member.id, sha256: m.sha256, name: m.name, size: m.size, contentType: m.contentType, why, objective: optString(post.objective), post, sig })
+    return { item: itemOf(item) }
+  },
+
+  /** Any member adds a note to a listed item that is not retired. */
+  async 'context.note'(tx, { roomId, room, member, post, sig, now }) {
+    const { ref, item } = await listedItem(tx, roomId, post.sha256)
+    if (item.retired) throw new Refusal('that item is retired', 409)
+    const note = { member: member.id, text: text(post.text, 'a note', MAX_WHY), at: now }
+    const notes = [...((item.notes as unknown[]) ?? []), note]
+    tx.update(ref, { notes })
+    emit(tx, roomId, room, now, { type: 'context.note', by: member.id, sha256: item.sha256 as string, name: item.name as string, text: note.text, post, sig })
+    return { item: itemOf({ ...item, notes }) }
+  },
+
+  /** Only the member that added an item retires it: the bytes are deleted, the record stays, marked. */
+  async 'context.retire'(tx, { ctx, roomId, room, member, post, sig, now, afterCommit }) {
+    const { ref, item } = await listedItem(tx, roomId, post.sha256)
+    if (item.from !== member.id) throw new Refusal('only the Pluma that brought a file retires it', 403)
+    if (item.retired) throw new Refusal('that item is already retired', 409)
+    tx.update(ref, { retired: true, retiredAt: now })
+    emit(tx, roomId, room, now, { type: 'context.retire', by: member.id, sha256: item.sha256 as string, name: item.name as string, post, sig })
+    const objects = objectsOf(ctx)
+    afterCommit.push(() => objects.delete(contextPath(roomId, item.sha256 as string)))
+    return { item: itemOf({ ...item, retired: true, retiredAt: now }) }
   },
 }
 
@@ -393,17 +455,22 @@ export async function submitPost(ctx: Ctx, roomId: string, post: Record<string, 
   }
   const handler = HANDLERS[type]
   if (!handler) throw new Refusal(`unknown post type: ${type}`, 400)
-  return ctx.store.transaction(async (tx) => {
+  let after: (() => Promise<void>)[] = []
+  const out = await ctx.store.transaction(async (tx) => {
     const { room, member } = await memberOf(tx, { kind: 'agent', roomId, memberId }, roomId)
     requireOpen(room)
     const nonceRef = `rooms/${roomId}/nonces/${memberId}~${post.nonce}`
     if (await tx.get(nonceRef)) throw new Refusal('this post was already received', 409)
     const attachments = post.attachments === undefined ? undefined : await attachmentsOf(tx, roomId, type, post.attachments)
+    const context = post.context === undefined ? undefined : await contextOf(tx, roomId, type, post.context)
     const now = ctx.now()
-    const result = await handler(tx, { ctx, roomId, room, member, post, sig, now, attachments })
+    after = []
+    const result = await handler(tx, { ctx, roomId, room, member, post, sig, now, attachments, context, afterCommit: after })
     tx.set(nonceRef, { at: now })
     return result
   })
+  for (const fn of after) await fn()
+  return out
 }
 
 /** True when the draft's latest version carries an approve decision, on its fingerprint, by the owner's own Pluma. */
@@ -447,7 +514,7 @@ export async function roomsFor(ctx: Ctx, person: string): Promise<{ id: string; 
 
 // ---- attachments (v0.2, section 6) ----
 
-const withAttachments = (d: Data, attachments?: Attachment[]): Data => (attachments ? { ...d, attachments } : d)
+const withAttachments = (d: Data, attachments?: Attachment[], context?: string[]): Data => ({ ...d, ...(attachments ? { attachments } : {}), ...(context ? { context } : {}) })
 const optText = (v: unknown, what: string, max: number) => {
   if (v === undefined) return undefined
   if (typeof v !== 'string' || v.length > max) throw new Refusal(`${what} is text of at most ${max} characters`, 400)
@@ -541,4 +608,173 @@ export async function readAttachment(ctx: Ctx, actor: Actor, roomId: string, sha
   const bytes = Buffer.concat(chunks.map((c) => Buffer.from(c.data.data as Uint8Array)))
   if (sha256Bytes(bytes) !== sha) throw new Error(`attachment ${sha} in room ${roomId} does not match its hash`)
   return { sha256: sha, size: bytes.length, type: held.type as string, width: held.width as number, height: held.height as number, bytes }
+}
+
+// ---- the context library (v0.3, section 7) ----
+
+const MAX_WHY = 2000
+const MAX_CONTEXT_PER_POST = 32
+/** The type a post may name context items on. */
+const CARRIES_CONTEXT = CARRIES_ATTACHMENTS
+const CONTEXT_FETCH_MS = 15 * 60_000
+const UNCLAIMED_MS = 7 * 86_400_000
+const AFTER_CLOSE_MS = 30 * 86_400_000
+
+
+function objectsOf(ctx: Ctx): ObjectStore {
+  if (!ctx.objects) throw new Error('this host has no object store configured for context files (ROOMS_CONTEXT_BUCKET)')
+  return ctx.objects
+}
+
+/** The signed description of a file, as context.upload and context.add both carry it. */
+function contextMeta(r: Record<string, unknown>) {
+  if (typeof r.sha256 !== 'string' || !SHA256.test(r.sha256)) throw new Refusal('sha256 is 64 lowercase hex characters', 400)
+  if (typeof r.crc32c !== 'string' || !CRC32C_B64.test(r.crc32c)) throw new Refusal('crc32c is the base64 of its 4 big-endian bytes, as Cloud Storage writes it', 400)
+  if (typeof r.size !== 'number' || !Number.isSafeInteger(r.size) || r.size < 0) throw new Refusal('size is the whole number of bytes', 400)
+  if (typeof r.contentType !== 'string' || !r.contentType.trim() || r.contentType.length > 255) throw new Refusal('contentType is the file\'s media type', 400)
+  return { sha256: r.sha256, crc32c: r.crc32c, size: r.size, contentType: r.contentType, name: text(r.name, 'name', 200) }
+}
+
+/** An item as the protocol hands it out. */
+function itemOf(d: Data): ContextItem {
+  const i: ContextItem = {
+    sha256: d.sha256 as string, crc32c: d.crc32c as string, size: d.size as number, name: d.name as string, contentType: d.contentType as string,
+    why: d.why as string, from: d.from as string, answersTo: d.answersTo as string, at: d.at as number, notes: (d.notes as ContextItem['notes']) ?? [],
+  }
+  if (d.objective) i.objective = d.objective as string
+  if (d.retired) { i.retired = true; i.retiredAt = d.retiredAt as number }
+  return i
+}
+
+async function listedItem(tx: Pick<Tx, 'get'>, roomId: string, sha: unknown): Promise<{ ref: string; item: Data }> {
+  if (typeof sha !== 'string' || !SHA256.test(sha)) throw new Refusal('sha256 is 64 lowercase hex characters', 400)
+  const ref = `rooms/${roomId}/context/${sha}`
+  const item = await tx.get(ref)
+  if (!item) throw new Refusal('the library lists no such file', 404)
+  return { ref, item }
+}
+
+/** A post's context list: 1 to 32 items the room lists and has not retired. */
+async function contextOf(tx: Pick<Tx, 'get'>, roomId: string, type: string, raw: unknown): Promise<string[]> {
+  if (!CARRIES_CONTEXT.has(type)) throw new Refusal(`a ${type} post cannot carry context`, 400)
+  if (!Array.isArray(raw) || raw.length === 0) throw new Refusal('context is a non-empty list of sha256s', 400)
+  if (raw.length > MAX_CONTEXT_PER_POST) throw new Refusal(`a post names at most ${MAX_CONTEXT_PER_POST} context items`, 400)
+  for (const sha of raw) {
+    if (typeof sha !== 'string' || !SHA256.test(sha)) throw new Refusal('each context entry is a sha256: 64 lowercase hex characters', 400)
+    const item = await tx.get(`rooms/${roomId}/context/${sha}`)
+    if (!item) throw new Refusal(`the library lists no file ${sha.slice(0, 12)}; add it first`, 400)
+    if (item.retired) throw new Refusal(`the file ${sha.slice(0, 12)} is retired`, 400)
+  }
+  return raw as string[]
+}
+
+export type UploadAnswer = { held: true } | { held: false; uploadUrl: string }
+
+/**
+ * A member asks to upload one file: a signed {v:1, type:'context.upload', room, member, sha256, crc32c,
+ * size, contentType, name, at, nonce} and no body. The answer is held:true when this room already holds
+ * exactly those bytes, else a resumable session in the object store bound to that size, type and crc32c.
+ */
+export async function requestContextUpload(ctx: Ctx, roomId: string, req: Record<string, unknown>, sig: string): Promise<UploadAnswer> {
+  if (!req || typeof req !== 'object' || req.v !== 1 || req.type !== 'context.upload' || req.room !== roomId) throw new Refusal('not a signed v1 context.upload for this room', 401)
+  const memberId = String(req.member ?? '')
+  const key = memberId ? await ctx.store.get(`memberKeys/${memberId}`) : null
+  if (!key || key.retired || key.roomId !== roomId || !verifySigned(key.publicKey as string, req, sig)) throw new Refusal('not signed by a member key of this room', 401)
+  checkClock(ctx, req.at)
+  if (typeof req.nonce !== 'string' || !NONCE.test(req.nonce)) throw new Refusal('nonce is 16 to 64 base64url characters', 400)
+  const m = contextMeta(req)
+  const objects = objectsOf(ctx)
+  const listed = await ctx.store.transaction(async (tx) => {
+    const { room } = await memberOf(tx, { kind: 'agent', roomId, memberId }, roomId)
+    requireOpen(room)
+    const nonceRef = `rooms/${roomId}/nonces/${memberId}~${req.nonce}`
+    if (await tx.get(nonceRef)) throw new Refusal('this upload request was already received', 409)
+    const item = await tx.get(`rooms/${roomId}/context/${m.sha256}`)
+    if (item?.retired) throw new Refusal('the library retired that file; it is not listed again', 409)
+    tx.set(nonceRef, { at: ctx.now() })
+    return !!item
+  })
+  const path = contextPath(roomId, m.sha256)
+  const held = await objects.stat(path)
+  if (held && held.size === m.size && held.crc32c === m.crc32c) return { held: true }
+  // An object at this name that is not these bytes was never listed (an item is listed only on an
+  // exact match), so it is a dead upload under a false hash: clear it, so a session can land.
+  if (held && !listed) await objects.delete(path)
+  return { held: false, uploadUrl: await objects.createResumableSession(path, { size: m.size, contentType: m.contentType, crc32c: m.crc32c }) }
+}
+
+/** A signed fetch of one context item: {v:1, type:'context.fetch', room, member, sha256, at, nonce}, naming the hash fetched. */
+export async function agentForSignedContextFetch(ctx: Ctx, roomId: string, sha: string, req: Record<string, unknown>, sig: string): Promise<Actor> {
+  if (req.sha256 !== sha) throw new Refusal('the signed fetch names another file', 401)
+  return agentForSignedRequest(ctx, roomId, req, sig, 'context.fetch')
+}
+
+/** The item and a 15-minute signed address for its bytes, to the room's readers; 410 once the bytes are gone. */
+export async function fetchContext(ctx: Ctx, actor: Actor, roomId: string, sha: string, opts: { inline?: boolean } = {}): Promise<{ item: ContextItem; downloadUrl: string }> {
+  if (!SHA256.test(sha)) throw NOT_FOUND()
+  if (actor.kind === 'person') {
+    if (!(await ctx.store.get(`rooms/${roomId}`)) || !(await personMayRead(ctx, roomId, actor.person))) throw NOT_FOUND()
+  } else {
+    await memberOf(ctx.store, actor, roomId)
+  }
+  const d = await ctx.store.get(`rooms/${roomId}/context/${sha}`)
+  if (!d) throw NOT_FOUND()
+  const item = itemOf(d)
+  if (item.retired) throw new Refusal('that file was retired from the library; its bytes are deleted', 410)
+  const room = (await ctx.store.get(`rooms/${roomId}`))!
+  if (room.contextPurgedAt) throw new Refusal(`this room closed more than ${HOUSEKEEPING_DECLARATION.housekeeping.afterCloseDays} days ago; its files are deleted and their records kept`, 410)
+  const downloadUrl = await objectsOf(ctx).signedReadUrl(contextPath(roomId, sha), CONTEXT_FETCH_MS, { filename: item.name, inline: opts.inline })
+  return { item, downloadUrl }
+}
+
+/** The host operator closes a room: it refuses writes from then on, and its context bytes go 30 days later. */
+export async function closeRoom(ctx: Ctx, roomId: string) {
+  await ctx.store.transaction(async (tx) => {
+    const room = await tx.get(`rooms/${roomId}`)
+    if (!room) throw NOT_FOUND()
+    if (room.state === 'closed') return
+    const now = ctx.now()
+    tx.update(`rooms/${roomId}`, { state: 'closed', closedAt: now })
+    emit(tx, roomId, room, now, { type: 'room.closed', by: 'host' })
+  })
+}
+
+/** Every context byte under one room, deleted (delete-room, and a closed room's purge). */
+export async function deleteRoomContext(ctx: Ctx, roomId: string): Promise<number> {
+  const objects = objectsOf(ctx)
+  const all = await objects.list(contextPrefix(roomId))
+  for (const o of all) await objects.delete(o.path)
+  return all.length
+}
+
+const OBJECT_PATH = /^rooms\/([^/]+)\/context\/([0-9a-f]{64})$/
+
+/**
+ * The declared housekeeping, run by the daily cron: a closed room's context bytes go 30 days after it
+ * closed (the item records stay with the thread); bytes no context.add claimed go after 7 days; the
+ * bytes of a retired item, or of a room that no longer exists, go whenever they are found.
+ */
+export async function housekeep(ctx: Ctx) {
+  const objects = objectsOf(ctx)
+  const now = ctx.now()
+  const out = { closedRoomsPurged: 0, unclaimedDeleted: 0, retiredDeleted: 0, orphanDeleted: 0 }
+  const roomDocs = new Map((await ctx.store.list('rooms')).map((r) => [r.id, r.data]))
+  for (const [id, r] of roomDocs) {
+    if (r.state === 'closed' && typeof r.closedAt === 'number' && now - r.closedAt > AFTER_CLOSE_MS && !r.contextPurgedAt) {
+      await deleteRoomContext(ctx, id)
+      await ctx.store.transaction(async (tx) => { tx.update(`rooms/${id}`, { contextPurgedAt: now }) })
+      r.contextPurgedAt = now
+      out.closedRoomsPurged++
+    }
+  }
+  for (const o of await objects.list('rooms/')) {
+    const m = OBJECT_PATH.exec(o.path)
+    if (!m) continue
+    const [, roomId, sha] = m
+    if (!roomDocs.has(roomId)) { await objects.delete(o.path); out.orphanDeleted++; continue }
+    const item = await ctx.store.get(`rooms/${roomId}/context/${sha}`)
+    if (item?.retired) { await objects.delete(o.path); out.retiredDeleted++ }
+    else if (!item && now - o.createdAt > UNCLAIMED_MS) { await objects.delete(o.path); out.unclaimedDeleted++ }
+  }
+  return out
 }

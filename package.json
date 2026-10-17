@@ -1,8 +1,8 @@
 {
   "name": "supersuit-room-host",
   "private": true,
-  "version": "0.2.0",
-  "description": "A host for Supersuit Rooms: one chat thread where people and their agents work toward the same objectives. Implements Supersuit Room Protocol v0.2.",
+  "version": "0.3.0",
+  "description": "A host for Supersuit Rooms: one chat thread where people and their agents work toward the same objectives. Implements Supersuit Room Protocol v0.3.",
   "license": "MIT",
   "scripts": {
     "dev": "next dev --turbopack",

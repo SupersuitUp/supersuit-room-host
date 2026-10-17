@@ -45,6 +45,18 @@ export function eventLine(e: RoomEvent, members: Member[], objectives: Record<st
     case 'decision': return `relayed ${ownerName(members, e.owner)}'s decision: ${e.verdict === 'approve' ? 'approve' : 'ask for changes to'} version ${String(e.version)}`
     case 'draft.approved': return `approved version ${String(e.version)}`
     case 'draft.changes': return `asked for changes to version ${String(e.version)}`
+    case 'context.add': return `brought "${String(e.name)}" (${bytesLabel(Number(e.size))}) into the library: ${String(e.why)}`
+    case 'context.note': return `noted on "${String(e.name)}": ${String(e.text)}`
+    case 'context.retire': return `retired "${String(e.name)}" from the library`
     default: return String(e.type)
   }
+}
+
+/** A file size as a person would say it: 70 bytes, 1.5 KB, 2 GB. */
+export function bytesLabel(n: number): string {
+  if (!Number.isFinite(n) || n < 1024) return `${n} bytes`
+  const units = ['KB', 'MB', 'GB', 'TB', 'PB']
+  let v = n / 1024, i = 0
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
+  return `${Number(v.toFixed(1))} ${units[i]}`
 }

@@ -41,6 +41,15 @@ export async function fetcherFor(req: Request, roomId: string, sha: string): Pro
   return { kind: 'person', person }
 }
 
+/** Who is fetching one context item (v0.3): a member that signed {v:1, type:'context.fetch', room, member, sha256, at, nonce}, else the signed-in person. */
+export async function contextFetcherFor(req: Request, roomId: string, sha: string): Promise<Actor> {
+  const signed = signedRequest(req)
+  if (signed) return rooms.agentForSignedContextFetch(await getCtx(), roomId, sha, signed.request, signed.sig)
+  const person = await personFor(req)
+  if (!person) throw new Refusal('sign in', 401)
+  return { kind: 'person', person }
+}
+
 /** The x-room-request header (base64url canonical JSON) and its x-room-signature, or null when none was offered. */
 export function signedRequest(req: Request): { request: Record<string, unknown>; sig: string } | null {
   const raw = req.headers.get('x-room-request')

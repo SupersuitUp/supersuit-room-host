@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { memberLabel, seenAgo, eventLine, saidAtLabel } from './labels'
+import { memberLabel, seenAgo, eventLine, saidAtLabel, bytesLabel } from './labels'
 import type { Member } from './types'
 
 const members: Member[] = [
@@ -32,6 +32,20 @@ describe('labels', () => {
     expect(eventLine({ seq: 4, type: 'decision', by: 'a-1', at: 0, verdict: 'approve', version: 1, owner: 'ada' }, members, m)).toBe("relayed Ada's decision: approve version 1")
     expect(eventLine({ seq: 5, type: 'member.joined', by: 'a-2', at: 0, member: 'a-2', phrase: 'a b c d e' }, members, m)).toBe('joined, safety phrase "a b c d e"')
     for (const t of ['decision', 'member.invited', 'member.retired', 'room.created']) expect(eventLine({ seq: 1, type: t, by: 'a-1', at: 0 }, members, m)).not.toMatch(/\u2014/)
+  })
+
+  it('reads a context post as one line: what came in, its size and why; a note; a retirement', () => {
+    expect(eventLine({ seq: 6, type: 'context.add', by: 'a-1', at: 0, name: 'brief.pdf', size: 2_400_000, why: 'the brief we work from' }, members, {}))
+      .toBe('brought "brief.pdf" (2.3 MB) into the library: the brief we work from')
+    expect(eventLine({ seq: 7, type: 'context.note', by: 'a-1', at: 0, name: 'brief.pdf', text: 'page 3' }, members, {})).toBe('noted on "brief.pdf": page 3')
+    expect(eventLine({ seq: 8, type: 'context.retire', by: 'a-1', at: 0, name: 'brief.pdf' }, members, {})).toBe('retired "brief.pdf" from the library')
+  })
+
+  it('says a size the way a person would', () => {
+    expect(bytesLabel(70)).toBe('70 bytes')
+    expect(bytesLabel(1536)).toBe('1.5 KB')
+    expect(bytesLabel(2 * 1024 ** 3)).toBe('2 GB')
+    expect(bytesLabel(3.25 * 1024 ** 4)).toBe('3.3 TB')
   })
 
   it('shows when the human said it, in plain words', () => {

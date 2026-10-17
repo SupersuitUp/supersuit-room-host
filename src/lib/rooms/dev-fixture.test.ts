@@ -18,4 +18,15 @@ describe('the development fixture', () => {
     expect(v.members.some((m) => m.test)).toBe(true)
     expect(v.drafts[0].decisions[0].words).toBeTruthy()
   })
+
+  it('seeds a library: an image and a document, each with a why, one with a note, one retired, and a fetch the browser can open', async () => {
+    const { ctx, roomId } = await seedDevFixture()
+    const v = await rooms.read(ctx, { kind: 'person', person: 'ada' }, roomId, 0)
+    expect(v.context.length).toBeGreaterThanOrEqual(3)
+    expect(v.context.every((c) => c.why)).toBe(true)
+    expect(v.context.some((c) => c.notes.length)).toBe(true)
+    expect(v.context.some((c) => c.retired)).toBe(true)
+    const live = v.context.find((c) => !c.retired && c.contentType.startsWith('image/'))!
+    expect((await rooms.fetchContext(ctx, { kind: 'person', person: 'ada' }, roomId, live.sha256)).downloadUrl).toMatch(/^data:image\/png;base64,/)
+  })
 })

@@ -2,14 +2,16 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import type { Attachment, Draft, Member, RoomView as View } from '@/lib/rooms/types'
-import { eventLine, memberLabel, saidAtLabel, seenAgo } from '@/lib/rooms/labels'
+import type { Attachment, ContextItem, Draft, Member, RoomView as View } from '@/lib/rooms/types'
+import { bytesLabel, eventLine, memberLabel, saidAtLabel, seenAgo } from '@/lib/rooms/labels'
+import { houseRules } from '@/lib/rooms/housekeeping'
 import { SignIn } from '../../sign-in'
 
 // Read-only, by design: the room's members are Plumas. A person speaks through their own Pluma,
 // in their own chat, and reads here. There is no composer and no button that writes.
 export function RoomView({ id }: { id: string }) {
   const [open, setOpen] = useState<Attachment | null>(null)
+  const [tab, setTab] = useState<'thread' | 'context'>('thread')
   const q = useQuery({
     queryKey: ['room', id],
     refetchInterval: 5_000,
@@ -32,6 +34,8 @@ export function RoomView({ id }: { id: string }) {
   const active = v.members.filter((m) => !m.retired)
 
   const show = (list: unknown) => <Attachments roomId={id} list={list} onOpen={setOpen} />
+  const library = v.context ?? []
+  const draws = (list: unknown) => <DrawsOn list={list} library={library} onOpen={() => setTab('context')} />
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-xl flex-col px-5 pb-16 pt-6">
@@ -57,19 +61,31 @@ export function RoomView({ id }: { id: string }) {
         </ul>
       </section>
 
-      <section aria-label="Thread" className="flex-1 py-4">
+      <nav aria-label="Views" className="hairline flex gap-6 border-b pt-3 text-xs uppercase tracking-[0.2em]">
+        {(['thread', 'context'] as const).map((t) => (
+          <button key={t} type="button" onClick={() => setTab(t)} aria-current={tab === t ? 'page' : undefined}
+            className={`-mb-px border-b-2 pb-2 ${tab === t ? 'border-bronze text-marble' : 'border-transparent text-bronze'}`}>
+            {t === 'thread' ? 'Thread' : `Context · ${library.filter((c) => !c.retired).length}`}
+          </button>
+        ))}
+      </nav>
+
+      {tab === 'context' && <Library roomId={id} items={library} members={v.members} purged={!!v.room.contextPurgedAt} />}
+
+      <section aria-label="Thread" hidden={tab !== 'thread'} className="flex-1 py-4">
         <ol className="space-y-4">
           {v.events.map((e) => {
             const who = memberLabel(v.members, e.by)
             if (e.type === 'draft.version') {
               const d = v.drafts.find((x) => x.id === e.draft)
-              if (d && d.latest === e.version) return <DraftCard key={e.seq} draft={d} ownerName={ownerName(d.owner)} by={who} show={show} />
+              if (d && d.latest === e.version) return <DraftCard key={e.seq} draft={d} ownerName={ownerName(d.owner)} by={who} show={show} draws={draws} />
             }
             return (
               <li key={e.seq}>
                 <div className="text-sm"><span className="font-display text-base text-marble">{who.name}</span>{who.note && <span className="text-mist/60"> · {who.note}</span>}</div>
                 {e.type === 'message' && e.text ? <p className="mt-1 whitespace-pre-wrap text-mist">{String(e.text)}</p> : null}
                 {(e.type === 'message' || e.type === 'decision' || e.type === 'draft.version') && show(e.attachments)}
+                {(e.type === 'message' || e.type === 'decision' || e.type === 'draft.version') && draws(e.context)}
                 {e.type === 'decision' && (
                   <div className="mt-1 border-l-2 border-decisions pl-3">
                     <p className="text-sm text-mist/70">{eventLine(e, v.members, objectiveTitles)}</p>
@@ -133,7 +149,7 @@ function MemberLine({ m, members, now }: { m: Member; members: Member[]; now: nu
   )
 }
 
-function DraftCard({ draft, ownerName, by, show }: { draft: Draft; ownerName: string; by: { name: string; note: string }; show: (list: unknown) => React.ReactNode }) {
+function DraftCard({ draft, ownerName, by, show, draws }: { draft: Draft; ownerName: string; by: { name: string; note: string }; show: (list: unknown) => React.ReactNode; draws: (list: unknown) => React.ReactNode }) {
   const latest = draft.versions.find((x) => x.n === draft.latest)!
   const decision = draft.decisions.filter((a) => a.version === latest.n && a.fingerprint === latest.fingerprint).at(-1)
   return (
@@ -142,9 +158,88 @@ function DraftCard({ draft, ownerName, by, show }: { draft: Draft; ownerName: st
       <div className="mt-1 font-display text-xl text-marble">{draft.title}</div>
       <p className="mt-2 whitespace-pre-wrap text-mist">{latest.text}</p>
       {show(latest.attachments)}
+      {draws(latest.context)}
       <div className="mt-2 text-xs text-mist/60">from {by.name} · fingerprint {latest.fingerprint.slice(0, 12)}</div>
       <div className="mt-2 text-sm text-craft">
         {decision ? (decision.verdict === 'approve' ? `Approved by ${ownerName}` : `${ownerName} asked for changes`) : `Waiting on ${ownerName}, through their Pluma`}
+      </div>
+    </li>
+  )
+}
+
+/** The library items a post draws on, by name; a tap opens the Context tab. */
+function DrawsOn({ list, library, onOpen }: { list: unknown; library: ContextItem[]; onOpen: () => void }) {
+  if (!Array.isArray(list) || list.length === 0) return null
+  const names = (list as string[]).map((sha) => library.find((c) => c.sha256 === sha)?.name ?? `${sha.slice(0, 12)}`)
+  return (
+    <button type="button" onClick={onOpen} className="mt-1 block text-left text-xs text-mist/60 underline decoration-mist/30 underline-offset-2">
+      Draws on {names.join(', ')}
+    </button>
+  )
+}
+
+const ask = async (roomId: string, sha: string, inline: boolean): Promise<string> => {
+  const r = await fetch(`/api/rooms/${roomId}/context/${sha}${inline ? '?inline=1' : ''}`)
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? 'could not open the file')
+  return (await r.json()).downloadUrl as string
+}
+
+/** Previews stay small on a phone: an image or a short video is shown inline, anything else is a download. */
+const previewKind = (c: ContextItem): 'image' | 'video' | null =>
+  c.contentType.startsWith('image/') && c.size <= 25 * 1024 ** 2 ? 'image'
+    : c.contentType.startsWith('video/') && c.size <= 200 * 1024 ** 2 ? 'video' : null
+
+function Library({ roomId, items, members, purged }: { roomId: string; items: ContextItem[]; members: Member[]; purged: boolean }) {
+  const newestFirst = [...items].sort((a, b) => b.at - a.at)
+  return (
+    <section aria-label="Context" className="flex-1 py-4">
+      <p className="text-sm text-mist/70">What the work draws on, and why each file is here.</p>
+      <ul className="mt-4 space-y-4">
+        {newestFirst.map((c) => <ContextCard key={c.sha256} roomId={roomId} c={c} members={members} purged={purged} />)}
+        {items.length === 0 && <li className="text-sm text-mist/70">Nothing in the library yet. A Pluma adds a file with a reason it matters.</li>}
+      </ul>
+      <div className="hairline mt-6 border-t pt-4">
+        <h2 className="text-xs uppercase tracking-[0.2em] text-bronze">House rules</h2>
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-mist/70">
+          {houseRules().map((r) => <li key={r}>{r}</li>)}
+        </ul>
+      </div>
+    </section>
+  )
+}
+
+function ContextCard({ roomId, c, members, purged }: { roomId: string; c: ContextItem; members: Member[]; purged: boolean }) {
+  const [err, setErr] = useState<string | null>(null)
+  const gone = c.retired || purged
+  const kind = gone ? null : previewKind(c)
+  const preview = useQuery({ queryKey: ['context-inline', roomId, c.sha256], enabled: !!kind, staleTime: 10 * 60_000, queryFn: () => ask(roomId, c.sha256, true) })
+  const who = memberLabel(members, c.from)
+  const download = async () => {
+    setErr(null)
+    try { window.location.assign(await ask(roomId, c.sha256, false)) } catch (e) { setErr((e as Error).message) }
+  }
+  return (
+    <li className={`border p-4 ${gone ? 'border-mist/15 opacity-70' : 'border-bronze/50'}`}>
+      <div className="break-words font-display text-lg text-marble">{c.name}</div>
+      <div className="mt-1 text-xs text-mist/60">brought by {who.name}{who.note && `, ${who.note}`} · {bytesLabel(c.size)}</div>
+      <p className="mt-2 whitespace-pre-wrap text-mist">{c.why}</p>
+      {kind === 'image' && preview.data && (
+        // eslint-disable-next-line @next/next/no-img-element -- a 15-minute signed address from this host's private bucket; no optimizer may fetch it
+        <img src={preview.data} alt={c.name} loading="lazy" className="mt-3 h-auto max-h-[60vh] w-full border border-mist/20 object-contain" />
+      )}
+      {kind === 'video' && preview.data && (
+        <video src={preview.data} controls playsInline preload="metadata" className="mt-3 max-h-[60vh] w-full border border-mist/20" />
+      )}
+      {c.notes.length > 0 && (
+        <ul className="mt-3 space-y-1 border-l-2 border-bronze/40 pl-3">
+          {c.notes.map((n, i) => <li key={i} className="text-sm text-mist/80"><span className="text-marble">{memberLabel(members, n.member).name}:</span> {n.text}</li>)}
+        </ul>
+      )}
+      <div className="mt-3 text-sm">
+        {c.retired ? <span className="text-mist/60">Retired; the file is deleted and this record stays.</span>
+          : purged ? <span className="text-mist/60">Deleted after the room closed; this record stays.</span>
+            : <button type="button" onClick={download} className="text-bronze underline underline-offset-2">Download</button>}
+        {err && <span className="ml-2 text-craft">{err}</span>}
       </div>
     </li>
   )
