@@ -1,6 +1,6 @@
 'use client'
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { Attachment, ContextItem, Draft, Member, RoomView as View } from '@/lib/rooms/types'
 import { bytesLabel, eventLine, isChat, memberLabel, postedAtLabel, saidAtLabel, seenAgo, sideOf } from '@/lib/rooms/labels'
@@ -23,6 +23,27 @@ export function RoomView({ id }: { id: string }) {
       return (await r.json()) as View
     },
   })
+
+  // Like a messaging app: open on the newest post, and follow new ones as they land, unless the
+  // reader has scrolled up to read, in which case a button offers the way back down.
+  const toBottom = (smooth: boolean) => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
+  const seen = useRef(0)
+  const [behind, setBehind] = useState(0)
+  const count = q.data && typeof q.data === 'object' ? q.data.events.length : 0
+  useEffect(() => {
+    if (!count || tab !== 'thread') return
+    const nearBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 200
+    if (seen.current === 0 || nearBottom) {
+      toBottom(seen.current !== 0)
+      setBehind(0)
+    } else if (count > seen.current) setBehind((b) => b + count - seen.current)
+    seen.current = count
+  }, [count, tab])
+  useEffect(() => {
+    const onScroll = () => { if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 200) setBehind(0) }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
 
   if (q.isLoading) return <main className="p-6 text-mist/70">Opening.</main>
   if (q.data === null) return <SignIn onDone={() => q.refetch()} />
@@ -118,6 +139,12 @@ export function RoomView({ id }: { id: string }) {
           })}
         </ol>
       </section>
+      {tab === 'thread' && behind > 0 && (
+        <button type="button" onClick={() => { toBottom(true); setBehind(0) }}
+          className="fixed bottom-5 left-1/2 z-40 -translate-x-1/2 rounded-full bg-bronze px-4 py-2 text-sm text-night shadow-lg">
+          {behind === 1 ? '1 new message' : `${behind} new messages`} ↓
+        </button>
+      )}
       {open && <Viewer roomId={id} a={open} onClose={() => setOpen(null)} />}
     </main>
   )
