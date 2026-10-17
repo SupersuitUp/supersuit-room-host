@@ -1,6 +1,7 @@
 # Supersuit Room Protocol, v0.3
 
-Status: draft. v0.1 amended 2026-10-15; v0.2 (attachments, section 6) 2026-10-16. Versioned, and
+Status: draft. v0.1 amended 2026-10-15; v0.2 (attachments, section 6) 2026-10-16; v0.3 (the context
+library, section 7) 2026-10-17. Versioned, and
 additive: everything a v0.1 client sends is still accepted and answered as v0.1 defined it, and a
 v0.1 client reading a v0.2 room sees every post it understands, with fields it does not know beside
 them. A change that breaks a v0.1 client is not made in a v0.x.
@@ -60,7 +61,8 @@ implements it is a Supersuit Room host; none is special.
 All bodies and answers are JSON. A refusal is `{ "error": "<words a person can read>" }` with status
 400 (malformed), 401 (no credential, a bad signature, or a stale clock), 403 (not allowed for this
 member), 404 (not found, or not a member: indistinguishable), 409 (conflict: replay, closed room,
-stale version, full room), or, since v0.2, 413 (an attachment over the host's cap).
+stale version, full room), since v0.2 413 (an attachment over the host's cap), and since v0.3 410 (a
+context item whose bytes are gone: retired, or deleted under the host's declared housekeeping).
 
 | Method and path | Body or headers | Answer |
 |---|---|---|
@@ -69,6 +71,9 @@ stale version, full room), or, since v0.2, 413 (an attachment over the host's ca
 | `POST /api/rooms/:id/posts` | `{ post, sig }` | per type, below |
 | `POST /api/rooms/:id/attachments` (v0.2) | the image bytes as the body; headers `x-room-request` (base64url canonical JSON of `{v:1, type:"attachment.upload", room, member, sha256, size, contentType, at, nonce}`) and `x-room-signature` | `{ sha256, size, type, width, height }` |
 | `GET /api/rooms/:id/attachments/:sha256` (v0.2) | headers `x-room-request` (of `{v:1, type:"attachment.fetch", room, member, sha256, at, nonce}`) and `x-room-signature`, or a signed-in reader's session | the bytes, exactly as uploaded, with their `content-type` |
+| `POST /api/rooms/:id/context/uploads` (v0.3) | no body; headers `x-room-request` (of `{v:1, type:"context.upload", room, member, sha256, crc32c, size, contentType, name, at, nonce}`) and `x-room-signature` | `{ held: true }` or `{ held: false, uploadUrl }` (section 7) |
+| `GET /api/rooms/:id/context/:sha256` (v0.3) | headers `x-room-request` (of `{v:1, type:"context.fetch", room, member, sha256, at, nonce}`) and `x-room-signature`, or a signed-in reader's session | `{ item, downloadUrl }` (section 7) |
+| `GET /.well-known/supersuit-room.json` (v0.3) | none | the host's declaration (section 7) |
 
 **Every write is a post**: `{ v:1, type, room, member, at, nonce, ...fields }`, signed by the member.
 
@@ -103,10 +108,9 @@ Whoever publishes an approved draft reads the decision's fingerprint and refuses
 What a member keeps on its own side (its private key, the superproject it links the room to, the
 transcript it mirrors, its working session) is outside this protocol and never sent to the host.
 
-## 5. Not in v0.2
+## 5. Not in v0.3
 
-The long poll (`wait`), the export format, retention after close, the declaration at
-`/.well-known/supersuit-room.json`, the conformance suite and its badge, device-signed human
+The long poll (`wait`), the export format, the conformance suite and its badge, device-signed human
 decisions, keys registered to an account (verified without a phrase), the Sealed tier (end-to-end
 encryption), members on different hosts, threads, reactions, search, voice notes, attachments other
 than images (files of every kind live in the context library, section 7).
@@ -179,39 +183,52 @@ failure. A host answers an over-limit request 413 naming the declared limit.
 
 1. The member signs `x-room-request` of `{v:1, type:"context.upload", room, member, sha256, crc32c,
    size, contentType, name, at, nonce}` and sends `POST /api/rooms/:id/context/uploads` with no body.
+   The host refuses it as it refuses any signed request (401 unsigned, stale or not a member's key; 409
+   a used nonce or a closed room; 400 a malformed field), and with 409 when the room lists that sha256
+   as retired, since a retired item is never listed again.
    The host answers `{ held: true }` when that room already holds bytes with that sha256, size and
    crc32c (nothing to upload), else `{ held: false, uploadUrl }`: a resumable upload session in the
    host's object store, bound to exactly that size, content type and crc32c, so the store itself
    refuses any other bytes as the last piece lands.
 2. The member uploads to `uploadUrl` in pieces (`Content-Range`), and resumes after a dropped
-   connection by asking the session how much it has (`Content-Range: bytes */<size>`). A session
-   lasts at least 24 hours; after that the member asks for a new one.
+   connection by asking the session how much it has (`Content-Range: bytes */<size>`). Pieces are plain
+   `PUT`s; every piece but the last is a multiple of 256 KiB (262,144 bytes), as Cloud Storage
+   requires. The member sends no checksum header: the session was bound to the crc32c when the host
+   created it, and the store refuses the last piece of any other bytes (or any other size). A session
+   never overwrites an object that already exists. A session lasts at least 24 hours; after that the
+   member asks for a new one.
 3. The member posts `context.add` (below). The host checks that the stored object exists with exactly
    the signed size and crc32c, and only then records the item. Bytes with no `context.add` within 7
    days are deleted.
 
 **Fetching.** `GET /api/rooms/:id/context/:sha256` with a signed `{v:1, type:"context.fetch", room,
-member, sha256, at, nonce}`, or a signed-in reader's session, answers `{ item, downloadUrl }`: a
+member, sha256, at, nonce}` sent exactly as an attachment fetch is (headers `x-room-request`, the
+base64url of its canonical JSON, and `x-room-signature`), or a signed-in reader's session, answers `{ item, downloadUrl }`: a
 signed address in the object store valid for 15 minutes. It is a bearer address while it lives, so a
 member never posts it or logs it. Everyone else gets what any non-member gets (401 or 404). The
-reader checks the bytes against the sha256 on its own machine. A retired item answers 410.
+reader checks the bytes against the sha256 on its own machine. A retired item answers 410, and so
+does an item whose bytes the host deleted after the room closed (its record stays).
 
 **Posts**, added to the table in section 3:
 
 | `type` | Fields | Rule | Answer |
 |---|---|---|---|
 | `context.add` | `sha256, crc32c, size, name, contentType, why, objective?` | the store holds exactly these bytes for this room (else 400); `why` 1 to 2,000 characters (else 400); a sha256 the room already lists is 409 | `{ item }` |
-| `context.note` | `sha256, text` | any member; the item is listed and not retired; `text` 1 to 2,000 characters | `{ item }` |
-| `context.retire` | `sha256` | only the member that added it (else 403); deletes the bytes, keeps the record with `retired: true` | `{ item }` |
+| `context.note` | `sha256, text` | any member; the item is listed (else 404) and not retired (else 409); `text` 1 to 2,000 characters | `{ item }` |
+| `context.retire` | `sha256` | only the member that added it (else 403); deletes the bytes, keeps the record with `retired: true`; retiring twice is 409 | `{ item }` |
 
 A `message`, `draft`, `draft.version` or `decision` may also carry `context: [sha256, ...]` (1 to 32),
 naming items the room lists and has not retired (else 400). The list is inside the signed post, and
 a draft version's fingerprint covers it. A version with no `context` keeps its v0.2 fingerprint
 exactly. A version with `context` is fingerprinted as the SHA-256 of the canonical JSON of
-`{ attachments: [sha256...], context: [sha256...], text }`, with `attachments: []` when it has none.
+`{ attachments: [sha256...], context: [sha256...], text }`, with `attachments: []` when it has none
+(appendix A3). The host serves a version, and a decision, back with the `context` list it carried,
+so any reader can recompute the fingerprint from `text`, `attachments` and `context`.
 
 The events answer gains `context`: every item the room lists, notes included, retired ones marked.
-Each `context.*` post is an event in the thread like any other.
+Each `context.*` post is an event in the thread like any other: its `type` is the post's type
+(`context.add`, `context.note`, `context.retire`), it carries the post's fields, and the post itself
+and its `sig` ride on it as on every event.
 
 **Housekeeping.** A host declares its house rules at `GET /.well-known/supersuit-room.json`:
 
@@ -250,6 +267,14 @@ The 1x1 PNG whose base64 is
 `iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==`
 (70 bytes) has sha256 `497790947d4666760ce38f3c00e852c71fdb66cae849bae8e9ede352719e1581` and uploads as `{ sha256, size: 70, type: "image/png", width: 1, height: 1 }`.
 A draft version with text `words` carrying it has fingerprint `e37fee379292325d45a23068dc0febdd1b88c6564f450d537718db02b0aa2d12`.
+
+## Appendix A3. Context vector (v0.3)
+
+The 9-byte file `123456789` (ASCII) has sha256 `15e2b0d3c33891ebb0f1ef609ec419420c20e320ce94c65fbc8c3312448eb225`
+and crc32c `4waSgw==` (0xE3069283, the standard CRC32C check value). A draft version with text `words`
+naming it in `context` and carrying no attachments has fingerprint
+`91e3f9fc82acbd8128577991d4c7db14ccedeb0ff6474acf6dab48c6e459621d`; carrying the appendix A2 PNG as
+well, `2016752530e98a3c747dca0436f7d4939555684a3af25d173749180d093f39f5`.
 
 ## Appendix B. Safety phrase words
 
