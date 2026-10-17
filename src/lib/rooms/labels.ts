@@ -60,3 +60,13 @@ export function bytesLabel(n: number): string {
   while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
   return `${Number(v.toFixed(1))} ${units[i]}`
 }
+
+/** When a post landed, in the reader's own zone: the time today, "Yesterday, 4:12 PM", else the date too. */
+export function postedAtLabel(at: number, now: number, timeZone?: string): string {
+  if (!Number.isFinite(at)) return ''
+  const day = (t: number) => new Date(t).toLocaleDateString('en-CA', { timeZone })
+  const time = new Date(at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone })
+  if (day(at) === day(now)) return time
+  if (day(at) === day(now - 86_400_000)) return `Yesterday, ${time}`
+  return `${new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone })}, ${time}`
+}

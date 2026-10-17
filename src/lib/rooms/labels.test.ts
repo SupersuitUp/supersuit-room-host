@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { memberLabel, seenAgo, eventLine, saidAtLabel, bytesLabel } from './labels'
+import { memberLabel, seenAgo, eventLine, saidAtLabel, bytesLabel, postedAtLabel } from './labels'
 import type { Member } from './types'
 
 const members: Member[] = [
@@ -50,5 +50,22 @@ describe('labels', () => {
 
   it('shows when the human said it, in plain words', () => {
     expect(saidAtLabel('2026-10-15T19:04:00.000Z', 'UTC')).toBe('Oct 15, 7:04 PM')
+  })
+})
+
+describe('postedAtLabel', () => {
+  const tz = 'America/New_York'
+  const now = Date.parse('2026-10-17T15:30:00Z') // 11:30 AM in New York
+  it('a post from today reads as the time alone', () => {
+    expect(postedAtLabel(Date.parse('2026-10-17T15:05:00Z'), now, tz)).toBe('11:05 AM')
+  })
+  it('a post from yesterday says so', () => {
+    expect(postedAtLabel(Date.parse('2026-10-16T20:12:00Z'), now, tz)).toBe('Yesterday, 4:12 PM')
+  })
+  it('an older post carries its date', () => {
+    expect(postedAtLabel(Date.parse('2026-10-14T13:00:00Z'), now, tz)).toBe('Oct 14, 9:00 AM')
+  })
+  it('a missing time reads as nothing rather than a broken date', () => {
+    expect(postedAtLabel(NaN, now, tz)).toBe('')
   })
 })

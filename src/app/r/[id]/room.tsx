@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { Attachment, ContextItem, Draft, Member, RoomView as View } from '@/lib/rooms/types'
-import { bytesLabel, eventLine, memberLabel, saidAtLabel, seenAgo } from '@/lib/rooms/labels'
+import { bytesLabel, eventLine, memberLabel, postedAtLabel, saidAtLabel, seenAgo } from '@/lib/rooms/labels'
 import { houseRules } from '@/lib/rooms/housekeeping'
 import { SignIn } from '../../sign-in'
 
@@ -78,11 +78,11 @@ export function RoomView({ id }: { id: string }) {
             const who = memberLabel(v.members, e.by)
             if (e.type === 'draft.version') {
               const d = v.drafts.find((x) => x.id === e.draft)
-              if (d && d.latest === e.version) return <DraftCard key={e.seq} draft={d} ownerName={ownerName(d.owner)} by={who} show={show} draws={draws} />
+              if (d && d.latest === e.version) return <DraftCard key={e.seq} draft={d} ownerName={ownerName(d.owner)} by={who} show={show} draws={draws} now={now} />
             }
             return (
               <li key={e.seq}>
-                <div className="text-sm"><span className="font-display text-base text-marble">{who.name}</span>{who.note && <span className="text-mist/60"> · {who.note}</span>}</div>
+                <div className="text-sm"><span className="font-display text-base text-marble">{who.name}</span>{who.note && <span className="text-mist/60"> · {who.note}</span>}<Posted at={e.at} now={now} /></div>
                 {e.type === 'message' && e.text ? <p className="mt-1 whitespace-pre-wrap text-mist">{String(e.text)}</p> : null}
                 {(e.type === 'message' || e.type === 'decision' || e.type === 'draft.version') && show(e.attachments)}
                 {(e.type === 'message' || e.type === 'decision' || e.type === 'draft.version') && draws(e.context)}
@@ -149,7 +149,14 @@ function MemberLine({ m, members, now }: { m: Member; members: Member[]; now: nu
   )
 }
 
-function DraftCard({ draft, ownerName, by, show, draws }: { draft: Draft; ownerName: string; by: { name: string; note: string }; show: (list: unknown) => React.ReactNode; draws: (list: unknown) => React.ReactNode }) {
+/** When a post landed, in the reader's own time zone. */
+function Posted({ at, now }: { at: number; now: number }) {
+  const label = postedAtLabel(at, now)
+  if (!label) return null
+  return <time dateTime={new Date(at).toISOString()} suppressHydrationWarning className="text-xs text-mist/50"> · {label}</time>
+}
+
+function DraftCard({ draft, ownerName, by, show, draws, now }: { draft: Draft; ownerName: string; by: { name: string; note: string }; show: (list: unknown) => React.ReactNode; draws: (list: unknown) => React.ReactNode; now: number }) {
   const latest = draft.versions.find((x) => x.n === draft.latest)!
   const decision = draft.decisions.filter((a) => a.version === latest.n && a.fingerprint === latest.fingerprint).at(-1)
   return (
@@ -159,7 +166,7 @@ function DraftCard({ draft, ownerName, by, show, draws }: { draft: Draft; ownerN
       <p className="mt-2 whitespace-pre-wrap text-mist">{latest.text}</p>
       {show(latest.attachments)}
       {draws(latest.context)}
-      <div className="mt-2 text-xs text-mist/60">from {by.name} · fingerprint {latest.fingerprint.slice(0, 12)}</div>
+      <div className="mt-2 text-xs text-mist/60">from {by.name}<Posted at={latest.at} now={now} /> · fingerprint {latest.fingerprint.slice(0, 12)}</div>
       <div className="mt-2 text-sm text-craft">
         {decision ? (decision.verdict === 'approve' ? `Approved by ${ownerName}` : `${ownerName} asked for changes`) : `Waiting on ${ownerName}, through their Pluma`}
       </div>
