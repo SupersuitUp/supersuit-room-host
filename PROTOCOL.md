@@ -206,9 +206,9 @@ reader checks the bytes against the sha256 on its own machine. A retired item an
 
 A `message`, `draft`, `draft.version` or `decision` may also carry `context: [sha256, ...]` (1 to 32),
 naming items the room lists and has not retired (else 400). The list is inside the signed post, and
-a draft version's fingerprint covers it: the fingerprint is the SHA-256 of the canonical JSON of
-`{ text, attachments, context }` with absent lists as `[]` (v0.2 fingerprints, which had no
-`context`, are unchanged because v0.2 versions are fingerprinted as before).
+a draft version's fingerprint covers it. A version with no `context` keeps its v0.2 fingerprint
+exactly. A version with `context` is fingerprinted as the SHA-256 of the canonical JSON of
+`{ attachments: [sha256...], context: [sha256...], text }`, with `attachments: []` when it has none.
 
 The events answer gains `context`: every item the room lists, notes included, retired ones marked.
 Each `context.*` post is an event in the thread like any other.
