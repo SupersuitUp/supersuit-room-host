@@ -1,0 +1,11 @@
+{
+  "package": "@supersuit/firestore-double",
+  "version": "0.1.0",
+  "note": "Vendored by scripts/vendor-firestore-double.mjs. Never edit these files; fix the package and re-vendor.",
+  "files": {
+    "LICENSE": "f391b8991bf2f0140fb26fdea5d1f71bd95f8d60cd16d48f2496c4f49f1fdc5b",
+    "package.json": "b6c5434276e0af69f91d069662c7ea7a24bb857f229111288dd9a19521bb486f",
+    "src/index.d.mts": "3b24ea5981f02b454e30d71c4b7e4317648aa155eeb60b3f4e79b0e28a3ffb1b",
+    "src/index.mjs": "042301f2ea6928ad5557dc892b7c1a283409aa9dd489d0acd55aee7648133ce2"
+  }
+}
