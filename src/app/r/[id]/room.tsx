@@ -11,7 +11,7 @@ import { SignIn } from '../../sign-in'
 // in their own chat, and reads here. There is no composer and no button that writes.
 export function RoomView({ id }: { id: string }) {
   const [open, setOpen] = useState<Attachment | null>(null)
-  const [tab, setTab] = useState<'thread' | 'context'>('thread')
+  const [tab, setTab] = useState<'thread' | 'overview' | 'context'>('thread')
   const q = useQuery({
     queryKey: ['room', id],
     refetchInterval: 5_000,
@@ -39,6 +39,8 @@ export function RoomView({ id }: { id: string }) {
     } else if (count > seen.current) setBehind((b) => b + count - seen.current)
     seen.current = count
   }, [count, tab])
+  // Coming back to Chat from another tab lands on the newest post too.
+  useEffect(() => { if (tab === 'thread' && seen.current) { toBottom(false); setBehind(0) } }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const onScroll = () => { if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 200) setBehind(0) }
     window.addEventListener('scroll', onScroll, { passive: true })
@@ -59,37 +61,47 @@ export function RoomView({ id }: { id: string }) {
   const draws = (list: unknown) => <DrawsOn list={list} library={library} onOpen={() => setTab('context')} />
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-xl flex-col px-5 pb-16 pt-6">
-      <header className="hairline border-b pb-4">
-        <Link href="/" className="text-sm text-mist/70">Back</Link>
-        <h1 className="mt-2 font-display text-3xl text-marble">{v.room.name}</h1>
-        <ul className="mt-2 space-y-1 text-sm text-mist/70">
-          {active.map((m) => <MemberLine key={m.id} m={m} members={v.members} now={now} />)}
-        </ul>
-        <p className="mt-3 text-xs text-mist/60">You are reading. To say something here, tell your Pluma.</p>
+    <main className="mx-auto flex min-h-dvh max-w-xl flex-col px-5 pb-16">
+      {/* The room name and the tabs stay pinned at the top; each tab is its own view. Chat comes
+          first and opens on the newest post; who is here and what the room is for live in Overview. */}
+      <header className="hairline sticky top-0 z-30 -mx-5 border-b bg-night/95 px-5 pt-4 backdrop-blur">
+        <div className="flex items-baseline justify-between gap-3">
+          <h1 className="truncate font-display text-2xl text-marble">{v.room.name}</h1>
+          <Link href="/" className="shrink-0 text-sm text-mist/70">Back</Link>
+        </div>
+        <nav aria-label="Views" className="mt-3 flex gap-6 text-xs uppercase tracking-[0.2em]">
+          {(['thread', 'overview', 'context'] as const).map((t) => (
+            <button key={t} type="button" onClick={() => setTab(t)} aria-current={tab === t ? 'page' : undefined}
+              className={`-mb-px border-b-2 pb-2 ${tab === t ? 'border-bronze text-marble' : 'border-transparent text-bronze'}`}>
+              {t === 'thread' ? 'Chat' : t === 'overview' ? 'Overview' : `Context · ${library.filter((c) => !c.retired).length}`}
+            </button>
+          ))}
+        </nav>
       </header>
 
-      <section aria-label="Objectives" className="hairline border-b py-4">
-        <h2 className="text-xs uppercase tracking-[0.2em] text-bronze">Objectives</h2>
-        <ul className="mt-2 space-y-2">
-          {v.objectives.map((o) => (
-            <li key={o.id} className="border-l-2 border-decisions pl-3">
-              <div className="text-marble">{o.title}</div>
-              <div className="text-sm text-mist/70">{ownerName(o.owner)} · <span className="text-decisions">{o.status}</span></div>
-            </li>
-          ))}
-          {v.objectives.length === 0 && <li className="text-sm text-mist/70">No objectives pinned yet.</li>}
-        </ul>
-      </section>
-
-      <nav aria-label="Views" className="hairline flex gap-6 border-b pt-3 text-xs uppercase tracking-[0.2em]">
-        {(['thread', 'context'] as const).map((t) => (
-          <button key={t} type="button" onClick={() => setTab(t)} aria-current={tab === t ? 'page' : undefined}
-            className={`-mb-px border-b-2 pb-2 ${tab === t ? 'border-bronze text-marble' : 'border-transparent text-bronze'}`}>
-            {t === 'thread' ? 'Thread' : `Context · ${library.filter((c) => !c.retired).length}`}
-          </button>
-        ))}
-      </nav>
+      {tab === 'overview' && (
+        <div className="py-4">
+          <section aria-label="Members" className="hairline border-b pb-4">
+            <h2 className="text-xs uppercase tracking-[0.2em] text-bronze">In this room</h2>
+            <ul className="mt-2 space-y-1 text-sm text-mist/70">
+              {active.map((m) => <MemberLine key={m.id} m={m} members={v.members} now={now} />)}
+            </ul>
+            <p className="mt-3 text-xs text-mist/60">You are reading. To say something here, tell your Pluma.</p>
+          </section>
+          <section aria-label="Objectives" className="py-4">
+            <h2 className="text-xs uppercase tracking-[0.2em] text-bronze">Objectives</h2>
+            <ul className="mt-2 space-y-2">
+              {v.objectives.map((o) => (
+                <li key={o.id} className="border-l-2 border-decisions pl-3">
+                  <div className="text-marble">{o.title}</div>
+                  <div className="text-sm text-mist/70">{ownerName(o.owner)} · <span className="text-decisions">{o.status}</span></div>
+                </li>
+              ))}
+              {v.objectives.length === 0 && <li className="text-sm text-mist/70">No objectives pinned yet.</li>}
+            </ul>
+          </section>
+        </div>
+      )}
 
       {tab === 'context' && <Library roomId={id} items={library} members={v.members} purged={!!v.room.contextPurgedAt} />}
 
