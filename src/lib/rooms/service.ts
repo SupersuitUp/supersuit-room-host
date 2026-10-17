@@ -143,7 +143,7 @@ async function activeMemberCount(ctx: Ctx, roomId: string) {
 
 /** A one-time, 24-hour door for one named member. The code is shown once; only its digest is kept. */
 export async function createInvite(ctx: Ctx, by: Inviter, roomId: string, p: { name: string; answersTo: string; test?: boolean }): Promise<{ code: string }> {
-  const code = randomBytes(16).toString('base64url')
+  const code = randomBytes(16).toString('hex') // hex: a base64url code can start with '-', which a CLI reads as a flag
   await ctx.store.transaction(async (tx) => {
     let room: Data | null
     let inviter = 'host'

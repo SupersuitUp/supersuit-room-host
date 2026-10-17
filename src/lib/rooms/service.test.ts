@@ -60,6 +60,13 @@ describe('members are Plumas, each with a key made on its own Mac', () => {
     expect(v.members.every((x) => x.kind === 'agent')).toBe(true)
   })
 
+  it('an invite code is safe to pass as a command-line argument: lowercase hex, never a leading dash', async () => {
+    for (let i = 0; i < 64; i++) {
+      const { code } = await rooms.createInvite(ctx, 'operator', roomId, { name: 'P' + i, answersTo: 'ada' })
+      expect(code).toMatch(/^[0-9a-f]{32}$/)
+    }
+  })
+
   it('a join must be signed by the key it registers', async () => {
     const { code } = await rooms.createInvite(ctx, 'operator', roomId, { name: 'P', answersTo: 'ada' })
     const k = pluma(), other = pluma()
