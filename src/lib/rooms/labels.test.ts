@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { memberLabel, seenAgo, eventLine, saidAtLabel, bytesLabel, postedAtLabel } from './labels'
+import { memberLabel, seenAgo, eventLine, saidAtLabel, bytesLabel, postedAtLabel, sideOf, isChat } from './labels'
 import type { Member } from './types'
 
 const members: Member[] = [
@@ -67,5 +67,27 @@ describe('postedAtLabel', () => {
   })
   it('a missing time reads as nothing rather than a broken date', () => {
     expect(postedAtLabel(NaN, now, tz)).toBe('')
+  })
+})
+
+describe('sideOf', () => {
+  it("puts the reader's own Pluma on the right and everyone else on the left", () => {
+    expect(sideOf(members, 'reader:ada', 'a-1')).toBe('right')
+    expect(sideOf(members, 'reader:ben', 'a-1')).toBe('left')
+  })
+  it("a member's own view puts that member on the right", () => {
+    expect(sideOf(members, 'a-1', 'a-1')).toBe('right')
+    expect(sideOf(members, 'a-1', 'a-2')).toBe('left')
+  })
+  it('the host and former members are never on the right', () => {
+    expect(sideOf(members, 'reader:ada', 'host')).toBe('left')
+    expect(sideOf(members, 'reader:ada', 'a-gone')).toBe('left')
+  })
+})
+
+describe('isChat', () => {
+  it('messages, decisions and library additions are chat; bookkeeping is not', () => {
+    for (const t of ['message', 'decision', 'context.add']) expect(isChat(t)).toBe(true)
+    for (const t of ['member.joined', 'objective.moved', 'objective.created', 'room.created', 'context.note', 'context.retire']) expect(isChat(t)).toBe(false)
   })
 })

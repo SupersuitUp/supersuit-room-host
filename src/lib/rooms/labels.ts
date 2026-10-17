@@ -70,3 +70,18 @@ export function postedAtLabel(at: number, now: number, timeZone?: string): strin
   if (day(at) === day(now - 86_400_000)) return `Yesterday, ${time}`
   return `${new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone })}, ${time}`
 }
+
+/**
+ * Which side of the chat a post sits on, as in a messaging app: the reader's own Pluma on the right,
+ * everyone else on the left. `you` is the events answer's field: `reader:<person>` for a signed-in
+ * person, or a member id for a member reading.
+ */
+export function sideOf(members: Member[], you: string, by: string): 'left' | 'right' {
+  if (by === you) return 'right'
+  if (!you.startsWith('reader:')) return 'left'
+  const m = members.find((x) => x.id === by)
+  return m && m.answersTo === you.slice('reader:'.length) ? 'right' : 'left'
+}
+
+/** Posts that read as chat bubbles; everything else is a small centered line. */
+export const isChat = (type: string) => type === 'message' || type === 'decision' || type === 'context.add'

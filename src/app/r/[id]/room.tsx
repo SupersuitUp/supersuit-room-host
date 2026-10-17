@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { Attachment, ContextItem, Draft, Member, RoomView as View } from '@/lib/rooms/types'
-import { bytesLabel, eventLine, memberLabel, postedAtLabel, saidAtLabel, seenAgo } from '@/lib/rooms/labels'
+import { bytesLabel, eventLine, isChat, memberLabel, postedAtLabel, saidAtLabel, seenAgo, sideOf } from '@/lib/rooms/labels'
 import { houseRules } from '@/lib/rooms/housekeeping'
 import { SignIn } from '../../sign-in'
 
@@ -73,27 +73,46 @@ export function RoomView({ id }: { id: string }) {
       {tab === 'context' && <Library roomId={id} items={library} members={v.members} purged={!!v.room.contextPurgedAt} />}
 
       <section aria-label="Thread" hidden={tab !== 'thread'} className="flex-1 py-4">
-        <ol className="space-y-4">
-          {v.events.map((e) => {
+        <ol className="space-y-3">
+          {v.events.map((e, n) => {
             const who = memberLabel(v.members, e.by)
+            const side = sideOf(v.members, v.you, e.by)
+            const right = side === 'right'
             if (e.type === 'draft.version') {
               const d = v.drafts.find((x) => x.id === e.draft)
-              if (d && d.latest === e.version) return <DraftCard key={e.seq} draft={d} ownerName={ownerName(d.owner)} by={who} show={show} draws={draws} now={now} />
+              if (d && d.latest === e.version) return <DraftCard key={e.seq} draft={d} ownerName={ownerName(d.owner)} by={who} show={show} draws={draws} now={now} right={right} />
             }
+            if (!isChat(e.type)) {
+              return (
+                <li key={e.seq} className="px-6 text-center text-xs text-mist/50">
+                  <span className="text-mist/70">{who.name}</span> {eventLine(e, v.members, objectiveTitles)}<Posted at={e.at} now={now} />
+                </li>
+              )
+            }
+            // A run of posts from one member shows the name once, as a messaging app does.
+            const prev = v.events[n - 1]
+            const sameRun = prev && prev.by === e.by && isChat(prev.type) && e.at - prev.at < 10 * 60_000
             return (
-              <li key={e.seq}>
-                <div className="text-sm"><span className="font-display text-base text-marble">{who.name}</span>{who.note && <span className="text-mist/60"> · {who.note}</span>}<Posted at={e.at} now={now} /></div>
-                {e.type === 'message' && e.text ? <p className="mt-1 whitespace-pre-wrap text-mist">{String(e.text)}</p> : null}
-                {(e.type === 'message' || e.type === 'decision' || e.type === 'draft.version') && show(e.attachments)}
-                {(e.type === 'message' || e.type === 'decision' || e.type === 'draft.version') && draws(e.context)}
-                {e.type === 'decision' && (
-                  <div className="mt-1 border-l-2 border-decisions pl-3">
-                    <p className="text-sm text-mist/70">{eventLine(e, v.members, objectiveTitles)}</p>
-                    <p className="mt-1 text-marble">&ldquo;{String(e.words)}&rdquo;</p>
-                    <p className="text-xs text-mist/60">{`${ownerName(String(e.owner))}, ${saidAtLabel(String(e.saidAt))}`}</p>
+              <li key={e.seq} className={`flex flex-col ${right ? 'items-end' : 'items-start'}`}>
+                {!sameRun && (
+                  <div className={`mb-1 px-1 text-xs ${right ? 'text-right' : ''}`}>
+                    <span className="text-marble">{who.name}</span>{who.note && <span className="text-mist/50"> · {who.note}</span>}<Posted at={e.at} now={now} />
                   </div>
                 )}
-                {e.type !== 'message' && e.type !== 'decision' && <p className="mt-1 text-sm text-mist/70">{eventLine(e, v.members, objectiveTitles)}</p>}
+                <div className={`max-w-[85%] rounded-2xl px-4 py-2 ${right ? 'rounded-br-md bg-bronze/25 text-marble' : 'rounded-bl-md bg-mist/10 text-mist'}`}>
+                  {e.type === 'message' && e.text ? <p className="whitespace-pre-wrap">{String(e.text)}</p> : null}
+                  {e.type === 'context.add' && <p className="text-sm">{eventLine(e, v.members, objectiveTitles)}</p>}
+                  {(e.type === 'message' || e.type === 'decision') && show(e.attachments)}
+                  {(e.type === 'message' || e.type === 'decision') && draws(e.context)}
+                  {e.type === 'decision' && (
+                    <div className="border-l-2 border-decisions pl-3">
+                      <p className="text-sm text-mist/70">{eventLine(e, v.members, objectiveTitles)}</p>
+                      <p className="mt-1 text-marble">&ldquo;{String(e.words)}&rdquo;</p>
+                      <p className="text-xs text-mist/60">{`${ownerName(String(e.owner))}, ${saidAtLabel(String(e.saidAt))}`}</p>
+                    </div>
+                  )}
+                </div>
+                {sameRun && <Posted at={e.at} now={now} className="mt-0.5 px-1" />}
               </li>
             )
           })}
@@ -150,17 +169,17 @@ function MemberLine({ m, members, now }: { m: Member; members: Member[]; now: nu
 }
 
 /** When a post landed, in the reader's own time zone. */
-function Posted({ at, now }: { at: number; now: number }) {
+function Posted({ at, now, className = '' }: { at: number; now: number; className?: string }) {
   const label = postedAtLabel(at, now)
   if (!label) return null
-  return <time dateTime={new Date(at).toISOString()} suppressHydrationWarning className="text-xs text-mist/50"> · {label}</time>
+  return <time dateTime={new Date(at).toISOString()} suppressHydrationWarning className={`text-xs text-mist/50 ${className}`}>{className ? label : ` · ${label}`}</time>
 }
 
-function DraftCard({ draft, ownerName, by, show, draws, now }: { draft: Draft; ownerName: string; by: { name: string; note: string }; show: (list: unknown) => React.ReactNode; draws: (list: unknown) => React.ReactNode; now: number }) {
+function DraftCard({ draft, ownerName, by, show, draws, now, right }: { draft: Draft; ownerName: string; by: { name: string; note: string }; show: (list: unknown) => React.ReactNode; draws: (list: unknown) => React.ReactNode; now: number; right: boolean }) {
   const latest = draft.versions.find((x) => x.n === draft.latest)!
   const decision = draft.decisions.filter((a) => a.version === latest.n && a.fingerprint === latest.fingerprint).at(-1)
   return (
-    <li className="border border-craft/60 p-4">
+    <li className={`max-w-[92%] rounded-2xl border border-craft/60 p-4 ${right ? 'ml-auto rounded-br-md' : 'mr-auto rounded-bl-md'}`}>
       <div className="text-xs uppercase tracking-[0.2em] text-craft">Draft · version {latest.n} · for {ownerName}</div>
       <div className="mt-1 font-display text-xl text-marble">{draft.title}</div>
       <p className="mt-2 whitespace-pre-wrap text-mist">{latest.text}</p>
