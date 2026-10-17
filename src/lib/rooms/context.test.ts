@@ -137,11 +137,11 @@ describe('uploading: the host opens a session bound to the signed bytes, and nev
 
 describe('context.add: the item is listed only after the store holds exactly the bytes signed', () => {
   it('records the item with who brought it, the person they answer to, and why; it is an event in the thread', async () => {
-    const { item } = await bring(ada, FILE, 'the brief Wilson wrote')
-    expect(item).toEqual({ sha256: hex(FILE), crc32c: crc32cBase64(FILE), size: FILE.length, name: 'brief.pdf', contentType: 'application/pdf', why: 'the brief Wilson wrote', from: ada.memberId, answersTo: 'ada', at: now, notes: [] })
+    const { item } = await bring(ada, FILE, 'the brief Ben wrote')
+    expect(item).toEqual({ sha256: hex(FILE), crc32c: crc32cBase64(FILE), size: FILE.length, name: 'brief.pdf', contentType: 'application/pdf', why: 'the brief Ben wrote', from: ada.memberId, answersTo: 'ada', at: now, notes: [] })
     const v = await rooms.read(ctx, asAgent(ben), roomId, 0)
     const e = v.events.find((x) => x.type === 'context.add')!
-    expect(e).toMatchObject({ by: ada.memberId, sha256: hex(FILE), name: 'brief.pdf', why: 'the brief Wilson wrote' })
+    expect(e).toMatchObject({ by: ada.memberId, sha256: hex(FILE), name: 'brief.pdf', why: 'the brief Ben wrote' })
     expect(e.sig).toBeTruthy()
   })
 
