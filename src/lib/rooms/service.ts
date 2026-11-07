@@ -24,7 +24,7 @@ import { HOUSEKEEPING_DECLARATION } from './housekeeping'
 export { HOUSEKEEPING_DECLARATION }
 import {
   MAX_MEMBERS, OBJECTIVE_STATUSES,
-  type Actor, type Attachment, type ContextItem, type Decision, type Draft, type DraftVersion, type Member, type Objective, type Room, type RoomEvent, type RoomView,
+  type Actor, type Attachment, type Proof, type Said, type ContextItem, type Decision, type Draft, type DraftVersion, type Member, type Objective, type Room, type RoomEvent, type RoomView,
 } from './types'
 
 /** objects is the object store for context bytes (v0.3); a host without one refuses context requests. */
@@ -316,10 +316,45 @@ type Handler = (tx: Tx, a: {
 }) => Promise<Record<string, unknown>>
 
 /** The post types that may carry attachments (v0.2). */
-const CARRIES_ATTACHMENTS = new Set(['message', 'draft', 'draft.version', 'decision'])
+const CARRIES_ATTACHMENTS = new Set(['message', 'step', 'draft', 'draft.version', 'decision'])
 
 /** The person a member speaks for. A Pluma decides, drafts and sets objectives only for this person. */
 const humanOf = (m: Member) => m.answersTo
+
+const MAX_PROOF = 8
+/** A step's proof (v0.4): 1 to 8 items, each a label and an optional https address. */
+function proofOf(raw: unknown): Proof[] | undefined {
+  if (raw === undefined) return undefined
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_PROOF) throw new Refusal(`proof is a list of 1 to ${MAX_PROOF} items`, 400)
+  return raw.map((p) => {
+    const r = (p ?? {}) as Record<string, unknown>
+    const label = text(r.label, 'a proof label', 200)
+    if (r.href === undefined) return { label }
+    if (typeof r.href !== 'string' || !/^https:\/\//.test(r.href) || r.href.length > 2000) throw new Refusal('a proof href is an https address', 400)
+    return { label, href: r.href }
+  })
+}
+
+/** A person's exact words and when they said them, carried by their own Pluma (v0.4). */
+function saidOf(raw: unknown, now: number): Said | undefined {
+  if (raw === undefined) return undefined
+  const r = (raw ?? {}) as Record<string, unknown>
+  const words = text(r.words, "the person's words", 4000)
+  const t = typeof r.saidAt === 'string' ? Date.parse(r.saidAt) : NaN
+  if (!Number.isFinite(t) || !/^\d{4}-\d\d-\d\dT/.test(String(r.saidAt))) throw new Refusal('saidAt is the ISO time the person said it', 400)
+  if (t > now + CLOCK_MS) throw new Refusal('saidAt is in the future', 400)
+  return { words, saidAt: r.saidAt as string }
+}
+
+/** The entries a post reverses (v0.4): 1 to 32 seqs that exist in this log. Read before any write. */
+async function reversesOf(tx: Pick<Tx, 'get'>, roomId: string, raw: unknown): Promise<number[] | undefined> {
+  if (raw === undefined) return undefined
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 32) throw new Refusal('reverses is a list of 1 to 32 entries', 400)
+  for (const seq of raw) {
+    if (!Number.isSafeInteger(seq) || !(await tx.get(`rooms/${roomId}/events/${pad(seq)}`))) throw new Refusal(`there is no entry ${String(seq)} to reverse`, 400)
+  }
+  return raw as number[]
+}
 
 const HANDLERS: Record<string, Handler> = {
   async message(tx, { roomId, room, member, post, sig, now, attachments, context }) {
@@ -349,6 +384,37 @@ const HANDLERS: Record<string, Handler> = {
     tx.update(`rooms/${roomId}/objectives/${oid}`, patch)
     emit(tx, roomId, room, now, { type: 'objective.moved', by: member.id, objective: oid, status: post.status as string, post, sig })
     return { objective: oid, status: post.status }
+  },
+
+  /** The intent changes forward: the old wording and the reason stay on the record. Only the owner's own Pluma. */
+  async 'objective.amend'(tx, { roomId, room, member, post, sig, now }) {
+    const oid = String(post.objective ?? '')
+    const ref = `rooms/${roomId}/objectives/${oid}`
+    const o = await tx.get(ref)
+    if (!o) throw new Refusal('no such objective', 404)
+    if (o.owner !== humanOf(member)) throw new Refusal("only the owner's own Pluma changes an intent", 403)
+    const reason = text(post.reason, 'the reason for the change', 2000)
+    const title = post.title === undefined ? undefined : text(post.title, 'title', 200)
+    const done = post.done === undefined ? undefined : text(post.done, 'definition of done', 2000)
+    if (title === undefined && done === undefined) throw new Refusal('give a new title, a new definition of done, or both', 400)
+    const from = { title: o.title as string, done: o.done as string }
+    const amended = [...((o.amended as unknown[] | undefined) ?? []), { ...from, reason, by: member.id, at: now }]
+    tx.update(ref, { ...(title ? { title } : {}), ...(done ? { done } : {}), amended, updatedAt: now })
+    emit(tx, roomId, room, now, { type: 'objective.amended', by: member.id, objective: oid, from, title, done, reason, post, sig })
+    return { objective: oid }
+  },
+
+  /** What a Pluma did, its proof, and whose move is next. A person's words ride in `said`, carried by their own Pluma. */
+  async step(tx, { roomId, room, member, post, sig, now, attachments, context }) {
+    const body = text(post.text, 'step')
+    if (post.next !== undefined && !isAgentMember(await tx.get(`rooms/${roomId}/members/${post.next}`))) throw new Refusal('that member is not in this room', 400)
+    if (post.objective !== undefined && !(await tx.get(`rooms/${roomId}/objectives/${post.objective}`))) throw new Refusal('no such objective', 400)
+    const reverses = await reversesOf(tx, roomId, post.reverses)
+    const seq = emit(tx, roomId, room, now, {
+      type: 'step', by: member.id, text: body, proof: proofOf(post.proof), next: optString(post.next), said: saidOf(post.said, now), reverses,
+      objective: optString(post.objective), attachments, context, post, sig,
+    })
+    return { seq }
   },
 
   async draft(tx, { roomId, room, member, post, sig, now, attachments, context }) {
@@ -396,9 +462,13 @@ const HANDLERS: Record<string, Handler> = {
     if (post.version !== d.latest) throw new Refusal('that is not the latest version; check in again on the latest', 409)
     const v = await tx.get(`rooms/${roomId}/drafts/${did}/versions/${post.version}`)
     if (!v || v.fingerprint !== post.fingerprint) throw new Refusal('the fingerprint does not match that version', 409)
+    // v0.4: what was turned down and why, and the entries this decision reverses.
+    const rejected = optText(post.rejected, 'what was rejected', 2000)
+    const reason = optText(post.reason, 'the reason', 2000)
+    const reverses = await reversesOf(tx, roomId, post.reverses)
     const id = newId('dc')
-    tx.set(`rooms/${roomId}/drafts/${did}/decisions/${id}`, withAttachments({ draft: did, version: post.version, fingerprint: post.fingerprint, verdict: post.verdict, words, saidAt: post.saidAt, by: member.id, at: now }, attachments, context))
-    emit(tx, roomId, room, now, { type: 'decision', by: member.id, draft: did, version: post.version as number, fingerprint: post.fingerprint as string, verdict: post.verdict, words, saidAt: post.saidAt as string, owner: d.owner as string, attachments, context, post, sig })
+    tx.set(`rooms/${roomId}/drafts/${did}/decisions/${id}`, withAttachments({ draft: did, version: post.version, fingerprint: post.fingerprint, verdict: post.verdict, words, saidAt: post.saidAt, by: member.id, at: now, ...(rejected ? { rejected } : {}), ...(reason ? { reason } : {}) }, attachments, context))
+    emit(tx, roomId, room, now, { type: 'decision', by: member.id, draft: did, version: post.version as number, fingerprint: post.fingerprint as string, verdict: post.verdict, words, saidAt: post.saidAt as string, owner: d.owner as string, decisionId: id, rejected, reason, reverses, attachments, context, post, sig })
     return { decision: id }
   },
 

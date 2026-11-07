@@ -24,11 +24,17 @@ export type Member = {
 }
 
 export type Room = { id: string; name: string; state: 'open' | 'closed'; createdBy: string; createdAt: number; seq: number; closedAt?: number; contextPurgedAt?: number }
-export type Objective = { id: string; title: string; owner: string; done: string; status: ObjectiveStatus; claimedBy?: string; updatedAt: number }
+export type Objective = { id: string; title: string; owner: string; done: string; status: ObjectiveStatus; claimedBy?: string; updatedAt: number; amended?: Amendment[] }
+/** A proof a step carries (v0.4): what shows the work was done, and where to see it. */
+export type Proof = { label: string; href?: string }
+/** A person's exact words, carried to the log by their own Pluma, with when they said them (v0.4). */
+export type Said = { words: string; saidAt: string }
+/** An earlier wording of an objective, kept when its owner's Pluma changes it (v0.4). */
+export type Amendment = { title: string; done: string; reason: string; by: string; at: number }
 /** An image a post carries, by the sha256 of bytes the host already holds for this room (v0.2). */
 export type Attachment = { sha256: string; type: string; width: number; height: number; size?: number; name?: string; alt?: string }
 export type DraftVersion = { n: number; text: string; fingerprint: string; by: string; at: number; attachments?: Attachment[]; context?: string[] }
-export type Decision = { id: string; draft: string; version: number; fingerprint: string; verdict: 'approve' | 'changes'; words: string; saidAt: string; by: string; at: number; attachments?: Attachment[]; context?: string[] }
+export type Decision = { id: string; draft: string; version: number; fingerprint: string; verdict: 'approve' | 'changes'; words: string; saidAt: string; by: string; at: number; rejected?: string; reason?: string; attachments?: Attachment[]; context?: string[] }
 export type Draft = { id: string; title: string; owner: string; objective?: string; latest: number; versions: DraftVersion[]; decisions: Decision[] }
 /** One file in the room's library (v0.3, section 7): the bytes by sha256, and why they are here. */
 export type ContextNote = { member: string; text: string; at: number }
