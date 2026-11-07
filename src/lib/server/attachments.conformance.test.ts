@@ -89,7 +89,8 @@ describe('conformance: attachments (Protocol v0.2, section 6)', () => {
     const r = await fetchAs(hex(PNG_1x1), { k: ben })
     expect(r.status).toBe(200)
     expect(r.headers.get('content-type')).toBe('image/png')
-    expect(r.headers.get('cache-control')).toMatch(/private/)
+    // v0.4: no-store, so a taken-back image is not kept in a browser cache (review finding 10).
+    expect(r.headers.get('cache-control')).toBe('no-store')
     expect(hex(new Uint8Array(await r.arrayBuffer()))).toBe(hex(PNG_1x1))
   })
 
