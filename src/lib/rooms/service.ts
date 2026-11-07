@@ -22,10 +22,11 @@ import { ATTACHMENT_TYPES, imageInfo } from './images'
 import { CRC32C_B64 } from './crc32c'
 import { contextPath, contextPrefix, type ObjectStore } from './object-store'
 import { HOUSEKEEPING_DECLARATION } from './housekeeping'
+import { checkEvents, type Check } from './checks'
 export { HOUSEKEEPING_DECLARATION }
 import {
   MAX_MEMBERS, OBJECTIVE_STATUSES,
-  type Actor, type Attachment, type Proof, type Said, type ContextItem, type Decision, type Draft, type DraftVersion, type Member, type Objective, type Room, type RoomEvent, type RoomView,
+  type Actor, type Attachment, type Proof, type Said, type ContextItem, type Decision, type Draft, type DraftVersion, type Member, type Objective, type Room, type RoomEvent, type RoomView, type Share,
 } from './types'
 
 /**
@@ -290,12 +291,13 @@ export async function read(ctx: Ctx, actor: Actor, roomId: string, after: number
     you = member.id
   }
   const room = (await ctx.store.get(`rooms/${roomId}`))!
-  const [members, objectives, drafts, events, library] = await Promise.all([
+  const [members, objectives, drafts, events, library, shares] = await Promise.all([
     ctx.store.list(`rooms/${roomId}/members`),
     ctx.store.list(`rooms/${roomId}/objectives`, { orderBy: 'createdAt' }),
     ctx.store.list(`rooms/${roomId}/drafts`, { orderBy: 'createdAt' }),
     ctx.store.list(`rooms/${roomId}/events`, { after: { field: 'seq', value: Number(after) || 0 }, orderBy: 'seq', limit: 500 }),
     ctx.store.list(`rooms/${roomId}/context`, { orderBy: 'at' }),
+    ctx.store.list(`rooms/${roomId}/shares`, { orderBy: 'at' }),
   ])
   const fullDrafts: Draft[] = await Promise.all(drafts.map(async (d) => {
     const [versions, decisions] = await Promise.all([
@@ -317,6 +319,7 @@ export async function read(ctx: Ctx, actor: Actor, roomId: string, after: number
     drafts: fullDrafts,
     events: evs,
     context: library.map((c) => itemOf(c.data)),
+    shares: shares.map((s) => ({ id: s.id, ...s.data }) as unknown as Share),
     cursor: evs.length ? evs[evs.length - 1].seq : Math.max(Number(after) || 0, 0),
     you,
   }
@@ -560,6 +563,47 @@ const HANDLERS: Record<string, Handler> = {
     const seq = emit(tx, roomId, room, now, { type: 'redact', by: member.id, target, post, sig })
     afterCommit.push(() => releaseAttachments(ctx, roomId, shas))
     return { seq }
+  },
+
+  // ---- read-only pages (v0.4) ----
+
+  /** Any member asks for a page of the log up to one entry. The asking counts as that person's yes. */
+  async 'share.request'(tx, { ctx, roomId, room, member, post, sig, now }) {
+    const upTo = Number(post.upTo)
+    if (!Number.isSafeInteger(upTo) || upTo < 1 || upTo > (room.seq as number)) throw new Refusal('upTo is a seq in this log', 400)
+    const members = await ctx.store.list(`rooms/${roomId}/members`)
+    const need = [...new Set(members.filter((m) => isAgentMember(m.data) && !m.data.retired && !m.data.test).map((m) => m.data.answersTo as string))]
+    const id = newId('s')
+    const s: Data = { upTo, by: member.id, at: now, need, yes: [humanOf(member)], status: 'waiting' }
+    emit(tx, roomId, room, now, { type: 'share.requested', by: member.id, share: id, upTo, post, sig })
+    return settleShare(tx, roomId, room, now, id, s, member, post, sig)
+  },
+
+  /** A person the share needs says yes, once, through their own Pluma. */
+  async 'share.approve'(tx, { roomId, room, member, post, sig, now }) {
+    const id = String(post.share ?? '')
+    const s = await tx.get(`rooms/${roomId}/shares/${id}`)
+    if (!s) throw new Refusal('no such share', 404)
+    if (s.status !== 'waiting') throw new Refusal(`that share is ${String(s.status)}`, 409)
+    const who = humanOf(member)
+    if (!(s.need as string[]).includes(who)) throw new Refusal('that share does not need this person', 403)
+    if ((s.yes as string[]).includes(who)) throw new Refusal('this person already said yes', 409)
+    emit(tx, roomId, room, now, { type: 'share.approved', by: member.id, share: id, post, sig })
+    return settleShare(tx, roomId, room, now, id, { ...s, yes: [...(s.yes as string[]), who] }, member, post, sig)
+  },
+
+  /** Any member turns a page off. Its link then shows nothing. */
+  async 'share.revoke'(tx, { roomId, room, member, post, sig, now }) {
+    const id = String(post.share ?? '')
+    const ref = `rooms/${roomId}/shares/${id}`
+    const s = await tx.get(ref)
+    if (!s) throw new Refusal('no such share', 404)
+    if (s.status === 'revoked') throw new Refusal('that share is already revoked', 409)
+    const { token: live, ...rest } = s
+    if (live) tx.delete(`shareTokens/${sha256(live as string)}`)
+    tx.set(ref, { ...rest, status: 'revoked' })
+    emit(tx, roomId, room, now, { type: 'share.revoked', by: member.id, share: id, post, sig })
+    return { share: id, status: 'revoked' }
   },
 
   // ---- the context library (v0.3, section 7) ----
@@ -992,6 +1036,49 @@ export async function allEvents(ctx: Ctx, roomId: string, upTo = Infinity): Prom
     for (const d of page) if ((d.data.seq as number) <= upTo) out.push(d.data as unknown as RoomEvent)
     if (page.length < 500 || (page.at(-1)!.data.seq as number) >= upTo) return out
     after = page.at(-1)!.data.seq as number
+  }
+}
+
+// ---- read-only pages (v0.4): live only on every operator's yes ----
+
+/**
+ * A share goes live when every person it needs has said yes. The page reads the live record up to
+ * `upTo`. emit can run twice in one transaction: each call advances room.seq in memory.
+ */
+function settleShare(tx: Tx, roomId: string, room: Data, now: number, id: string, s: Data, member: Member, post: Record<string, unknown>, sig: string) {
+  const need = s.need as string[], yes = s.yes as string[]
+  if (!need.every((p) => yes.includes(p))) { tx.set(`rooms/${roomId}/shares/${id}`, s); return { share: id, status: 'waiting' } }
+  const token = randomBytes(32).toString('base64url')
+  tx.set(`shareTokens/${sha256(token)}`, { roomId, share: id })
+  tx.set(`rooms/${roomId}/shares/${id}`, { ...s, status: 'live', token })
+  emit(tx, roomId, room, now, { type: 'share.live', by: member.id, share: id, upTo: s.upTo as number, post, sig })
+  return { share: id, status: 'live', token }
+}
+
+const SHOWN_ON_A_SHARE = new Set(['step', 'decision', 'objective.created', 'objective.amended', 'objective.moved', 'room.closed', 'redact'])
+export type SharedRoom = { room: Pick<Room, 'id' | 'name' | 'state' | 'createdAt'>; members: Member[]; objectives: Objective[]; events: RoomEvent[]; checks: Record<number, Check> }
+
+/** The page behind a share token: the intent, the entries and the decisions, and nothing a stranger should hold. */
+export async function readShare(ctx: Ctx, token: string): Promise<SharedRoom | null> {
+  const t = await ctx.store.get(`shareTokens/${sha256(token)}`)
+  if (!t) return null
+  const roomId = t.roomId as string
+  const [room, s] = await Promise.all([ctx.store.get(`rooms/${roomId}`), ctx.store.get(`rooms/${roomId}/shares/${t.share}`)])
+  if (!room || s?.status !== 'live') return null
+  const [members, objectives, events] = await Promise.all([
+    ctx.store.list(`rooms/${roomId}/members`),
+    ctx.store.list(`rooms/${roomId}/objectives`, { orderBy: 'createdAt' }),
+    allEvents(ctx, roomId, s.upTo as number),
+  ])
+  const shown = events.filter((e) => SHOWN_ON_A_SHARE.has(e.type))
+  const people = members.filter((m) => isAgentMember(m.data)).sort(byJoin).map(({ id, data }) => ({ id, ...data }) as unknown as Member)
+  const checks = checkEvents(shown, people)
+  return {
+    room: { id: roomId, name: room.name as string, state: room.state as Room['state'], createdAt: room.createdAt as number },
+    members: people.map((m) => ({ id: m.id, kind: 'agent', name: m.name, answersTo: m.answersTo, answersToName: m.answersToName })),
+    objectives: objectives.map((o) => ({ id: o.id, ...o.data }) as unknown as Objective),
+    events: shown.map(({ post: _p, sig: _s, attachments: _a, context: _c, ...rest }) => rest as RoomEvent),
+    checks,
   }
 }
 

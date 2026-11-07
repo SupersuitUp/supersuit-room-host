@@ -47,6 +47,9 @@ export type ContextItem = {
 }
 export type RoomEvent = { seq: number; type: string; by: string; at: number; redacted?: Redacted; post?: Record<string, unknown>; sig?: string; [k: string]: unknown }
 
+/** A read-only page of the log (v0.4): live once every person it needs said yes; the token only while live. */
+export type Share = { id: string; upTo: number; by: string; at: number; need: string[]; yes: string[]; status: 'waiting' | 'live' | 'revoked'; token?: string }
+
 export type RoomView = {
   room: Room
   members: Member[]
@@ -55,6 +58,8 @@ export type RoomView = {
   events: RoomEvent[]
   /** Every item the room's library lists, notes included, retired ones marked (v0.3). */
   context: ContextItem[]
+  /** Every read-only page asked for, live or not (v0.4). */
+  shares: Share[]
   cursor: number
   /** The reading member's id, or "reader:<person>" for a signed-in human. */
   you: string
