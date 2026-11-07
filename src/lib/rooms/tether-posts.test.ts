@@ -65,3 +65,19 @@ describe('decision', () => {
     expect(typeof e.decisionId).toBe('string')
   })
 })
+
+describe('session', () => {
+  it('records a tethered supersession joining and leaving the room, with its name', async () => {
+    await post(ctx, ada, 'session', { state: 'joined', name: 'Planning the plot' })
+    expect(await last()).toMatchObject({ type: 'session', by: ada.memberId, state: 'joined', name: 'Planning the plot' })
+    await post(ctx, ada, 'session', { state: 'left' })
+    expect(await last()).toMatchObject({ type: 'session', state: 'left' })
+    expect((await last()).sig).toBeTruthy()
+  })
+  it('refuses another state, a name over 80 characters, and a closed room', async () => {
+    await refused(post(ctx, ada, 'session', { state: 'paused' }), 400)
+    await refused(post(ctx, ada, 'session', { state: 'joined', name: 'x'.repeat(81) }), 400)
+    await post(ctx, ada, 'room.close', {})
+    await refused(post(ctx, ada, 'session', { state: 'joined' }), 409)
+  })
+})

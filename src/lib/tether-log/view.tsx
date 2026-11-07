@@ -4,7 +4,7 @@
 // It is the prototype ledger-newest-first.html, ported. It writes nothing: people never post.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { COPY, TERMS, type Part, type TermKey } from './terms.ts'
-import { abs, dayKey, dayLabel, dayName, rel } from './time.ts'
+import { abs, clock, dayKey, dayLabel, dayName, rel } from './time.ts'
 import { layout } from './layout.ts'
 import type { Check, Entry, TetherLogModel } from './types.ts'
 
@@ -155,10 +155,35 @@ export function TetherLogView({ model: m, mode, checkedBy, aboutHref, notice, ho
     return day && <div className="tl-run"><div className="tl-spine tl-short" style={{ gridRow: 1 }} aria-hidden="true" />{day}</div>
   }
   // A run is one grid. Each entry takes one row, with an empty ruled cell on the other side, as the prototype does.
+  // Where each tethered supersession started and ended: quiet lines between the entries, newest first,
+  // each on its own Pluma's side. A tether is temporary; the room keeps the record.
+  const marks = m.sittings.flatMap((s) => {
+    const side = m.right && s.who === m.right.name && m.left.name !== s.who ? 'right' : 'left'
+    const label = s.name ? `: ${s.name}` : ''
+    const out = [{ seq: s.fromSeq, at: s.from, side, text: `${s.who} tethered${label}` }]
+    if (s.to !== null && s.toSeq !== null) out.push({ seq: s.toSeq, at: s.to, side, text: `${s.who} ended${label}` })
+    return out
+  }).sort((a, b) => b.seq - a.seq)
+  let nextMark = 0
+  const markRows = (above: number, row: number) => {
+    const cells: ReactNode[] = []
+    while (nextMark < marks.length && marks[nextMark].seq > above) {
+      const k = marks[nextMark++]
+      cells.push(<div key={`k${k.seq}`} className={`tl-sit ${k.side === 'right' ? 'tl-r' : ''}`} style={{ gridRow: row + cells.length }} suppressHydrationWarning>{k.text}, {clock(k.at)}</div>)
+    }
+    return cells
+  }
+  const markRun = (above: number, key: string) => {
+    const cells = markRows(above, 1)
+    return cells.length > 0 && <div className="tl-run" key={key}><div className="tl-spine tl-short" style={{ gridRow: `1 / span ${cells.length}` }} aria-hidden="true" />{cells}</div>
+  }
   const runBlock = (entries: Entry[], clause: string, key: string) => {
     let row = 1
     const cells: ReactNode[] = []
     for (const e of entries) {
+      const sit = markRows(e.seq, row)
+      cells.push(...sit)
+      row += sit.length
       const day = dayRow(e, `d${e.seq}`, row)
       if (day) { cells.push(...day); row++ }
       const body = <EntryBody e={e} now={now} open={voucher} />
@@ -176,10 +201,13 @@ export function TetherLogView({ model: m, mode, checkedBy, aboutHref, notice, ho
         <header className="tl-title">
           <div className="tl-lead">
             {/* A shared page keeps the bar to the name; its lead sentence defines it. */}
-            <div className="tl-bar"><b>{mode === 'shared' ? TERMS.tetheredSupersession.label : say([{ term: 'tetheredSupersession' }], w)}</b><span suppressHydrationWarning>{dayKey(m.from) === dayKey(m.to) ? dayLabel(m.from) : `${dayLabel(m.from)} to ${dayLabel(m.to)}`}</span></div>
+            {/* The room is the place; a tether is temporary. A shared page keeps the bar to the word. */}
+            <div className="tl-bar"><b>{mode === 'shared' ? TERMS.room.label : say([{ term: 'room' }], w)}</b><span suppressHydrationWarning>{dayKey(m.from) === dayKey(m.to) ? dayLabel(m.from) : `${dayLabel(m.from)} to ${dayLabel(m.to)}`}</span></div>
             <p className="tl-done">{say(COPY.whatIs, w)}{m.people.join(' and ')}.</p>
             {mode === 'shared' && <p className="tl-done">{say(COPY.sharedLead, w)} {aboutHref && <><a href={aboutHref}>{say(COPY.sharedAbout, w)}</a>.</>}</p>}
-            <h1 className="tl-intent">{m.intent}</h1>
+            <p className="tl-done tl-count">{m.sittings.length} {say([{ term: 'tetheredSupersession', plural: m.sittings.length !== 1, lower: true }], w)}</p>
+            <h1 className="tl-intent">{m.name}</h1>
+            <p className="tl-aim">{m.intent}</p>
             <p className="tl-done"><b>Done means:</b> {m.done}</p>
             <div className="tl-stands">
               <div className="tl-state">{m.standing.state === 'Waiting' && <span className="tl-gem" />}{m.standing.state}<When at={m.standing.at} now={now} stack right /></div>
@@ -208,7 +236,7 @@ export function TetherLogView({ model: m, mode, checkedBy, aboutHref, notice, ho
             </details>
             <details className="tl-fold">
               <summary><span className="tl-c">{say(COPY.howToRead, w)}</span></summary>
-              <p className="tl-key">{say(COPY.keyIntro, w)} <i>{say(COPY.keyViolet, w)}</i> {say(COPY.keyTick, w)} {say(COPY.keySide, w)} {say(COPY.keyTap, w)}</p>
+              <p className="tl-key">{say(COPY.keyIntro, w)} <i>{say(COPY.keyViolet, w)}</i> {say(COPY.keyTick, w)} {say(COPY.keySide, w)} {say(COPY.keyTap, w)} {say(COPY.keyRoom, w)}</p>
             </details>
           </div>
         </header>
@@ -221,8 +249,9 @@ export function TetherLogView({ model: m, mode, checkedBy, aboutHref, notice, ho
 
         <main className="tl-book" ref={book}>
           {blocks.map((b, i) => b.kind === 'stamp'
-            ? <div key={`s${b.entry.seq}`}>{between(b.entry)}<Stamp e={b.entry} now={now} open={voucher} noReason={noReason} /></div>
+            ? <div key={`s${b.entry.seq}`}>{markRun(b.entry.seq, `k${b.entry.seq}`)}{between(b.entry)}<Stamp e={b.entry} now={now} open={voucher} noReason={noReason} /></div>
             : runBlock(b.entries, b.clause, `r${i}`))}
+          {markRun(-Infinity, 'k-end')}
         </main>
 
         <section className="tl-end" aria-label="Where the log began">

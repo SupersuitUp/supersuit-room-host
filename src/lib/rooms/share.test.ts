@@ -72,3 +72,14 @@ describe('a share', () => {
     expect((await post(ctx, ben, 'share.approve', { share }) as { status: string }).status).toBe('live')
   })
 })
+
+describe('sittings on a share', () => {
+  it('a shared page carries where each tethered supersession started and ended', async () => {
+    await post(ctx, ada, 'session', { state: 'joined', name: 'Planning the plot' })
+    await post(ctx, ada, 'session', { state: 'left' })
+    const { share } = await post(ctx, ada, 'share.request', { upTo: await seq() }) as { share: string }
+    const { token } = await post(ctx, ben, 'share.approve', { share }) as { token: string }
+    const s = (await rooms.readShare(ctx, token))!
+    expect(s.events.filter((e) => e.type === 'session').map((e) => e.state)).toEqual(['joined', 'left'])
+  })
+})

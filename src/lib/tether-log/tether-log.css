@@ -248,3 +248,8 @@ a.tl-rev{display:inline-block}
 .tl-done a{color:var(--navy);font-weight:500;text-decoration:underline;text-underline-offset:3px}
 .tl-said small.tl-did{margin-bottom:6px;font-weight:400}
 .tl-lead .tl-intent{margin-top:10px}
+/* The room's name is the title; the intent is the line under it (a tether is temporary, the room keeps the record). */
+.tl-aim{margin-top:8px;max-width:30em;font:400 clamp(21px,5.4vw,30px)/1.15 var(--serif);text-wrap:pretty}
+/* Where a tethered supersession started and ended: a quiet line, like a day break. */
+.tl-sit{grid-column:1;padding:10px var(--gutter) 6px;font:italic 400 15px/20px var(--serif);color:var(--mute);border-bottom:1px dashed var(--rule)}
+.tl-sit.tl-r{grid-column:3;text-align:right}

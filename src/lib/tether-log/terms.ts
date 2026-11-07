@@ -3,7 +3,7 @@
 // anywhere else in this folder, so a new word cannot ship with no link. On a member's page the first use
 // carries an ⓘ to its exact wiki page. On a shared page the wikis would land a stranger on a sign-in door,
 // so the first use defines the word in its own sentence.
-export type TermKey = 'pluma' | 'supersession' | 'superproject' | 'helm' | 'tetheredSupersession' | 'tether' | 'tetherLog'
+export type TermKey = 'pluma' | 'supersession' | 'superproject' | 'helm' | 'tetheredSupersession' | 'tether' | 'tetherLog' | 'room'
 const WIKI = 'https://wiki.supersuit.co/concepts'
 
 export const TERMS: Record<TermKey, { label: string; plural: string; url: string; gloss: string }> = {
@@ -14,6 +14,8 @@ export const TERMS: Record<TermKey, { label: string; plural: string; url: string
   tetheredSupersession: { label: 'Tethered supersession', plural: 'Tethered supersessions', url: `${WIKI}/tethered-supersession`, gloss: 'two conversations connected, so that two AI agents work toward one goal' },
   tether: { label: 'tether', plural: 'tethers', url: `${WIKI}/tethered-supersession`, gloss: 'a connection between two conversations' },
   tetherLog: { label: 'tether log', plural: 'tether logs', url: `${WIKI}/tethered-supersession`, gloss: 'the record of what two AI agents did together' },
+  // A tether is temporary and happens in a room; the room lasts after each tether ends (2026-11-07).
+  room: { label: 'Room', plural: 'Rooms', url: `${WIKI}/tethered-supersession`, gloss: 'a shared place where two AI agents work and keep their record' },
 }
 
 /** lower starts the label with a small letter, for a word inside a sentence. */
@@ -36,6 +38,7 @@ export const COPY = {
   keyTick: ['A tick means a signature on the post passed its check.'],
   keySide: ['A side belongs to one ', t('pluma'), '. "Carried by" names the one that brought a person\'s words.'],
   keyTap: ['Tap an entry to see its proof and its signature check.'],
+  keyRoom: ['A ', t('tether'), ' is temporary. The ', { term: 'room', lower: true }, ' keeps the record after it ends.'],
   shareSheet: ['Tell your ', t('pluma'), ' to share this page. Each person in this record must say yes. The page goes live on the last yes.'],
   sharedLead: ['This page is a read-only copy of a ', t('tetherLog'), '. The record comes from a ', { term: 'tetheredSupersession', lower: true }, '. Both people said yes to this page. It leaves out the full conversation and the files.'],
   sharedAbout: ['What this page is'],
@@ -46,4 +49,4 @@ export const COPY = {
 } satisfies Record<string, Part[]>
 
 /** A word that must come from TERMS. Used by the test over COPY. */
-export const DEFINED_WORD = /\b(Plumas?|supersessions?|superprojects?|Helm|tethers?)\b/i
+export const DEFINED_WORD = /\b(Plumas?|supersessions?|superprojects?|Helm|tethers?|rooms?)\b/i

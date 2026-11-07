@@ -1,7 +1,7 @@
 // src/lib/tether-log/model.test.ts
 import { describe, it, expect } from 'vitest'
 import { tetherLog } from './model.ts'
-import { storyFixture as S } from './story-fixture.ts'
+import { storyFixture as S, sittingsFixture } from './story-fixture.ts'
 
 const m = tetherLog(S)
 
@@ -77,5 +77,20 @@ describe('the fixture is invented', () => {
     // A commit id: 7 to 40 hex characters with at least one letter and one digit (a timestamp has no letter).
     expect(all).not.toMatch(/\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/)
     for (const w of ['Invite tree', 'commit', 'card', 'server', 'handle', 'Supersuit']) expect(`${w}: ${all.includes(w)}`).toBe(`${w}: false`)
+  })
+})
+
+describe('sittings', () => {
+  it('spans each tethered supersession from joined to left, and an open one runs to now', () => {
+    const s = tetherLog(sittingsFixture).sittings
+    expect(s).toEqual([
+      { memberId: 'a-ada', who: "Ada's Pluma", name: 'Planning the plot', from: Date.parse('2026-11-05T16:21:00.000Z'), fromSeq: 13, to: Date.parse('2026-11-05T16:30:00.000Z'), toSeq: 15 },
+      { memberId: 'a-ben', who: "Ben's Pluma", name: 'Watering days', from: Date.parse('2026-11-05T16:22:00.000Z'), fromSeq: 14, to: null, toSeq: null },
+    ])
+    expect(tetherLog(S).sittings).toEqual([])
+  })
+  it('a second join by the same Pluma closes its open span first', () => {
+    const again = { ...sittingsFixture, events: [...sittingsFixture.events, { seq: 16, type: 'session', by: 'a-ben', at: Date.parse('2026-11-05T17:00:00.000Z'), state: 'joined', name: 'Later' }] }
+    expect(tetherLog(again).sittings.filter((x) => x.memberId === 'a-ben').map((x) => [x.name, x.toSeq])).toEqual([['Watering days', 16], ['Later', null]])
   })
 })

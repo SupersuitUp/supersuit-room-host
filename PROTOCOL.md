@@ -253,6 +253,8 @@ the thread. The room page shows these rules on its library view.
 
 A **tether** is a room a Pluma opens itself. It is the same room in every other way.
 
+**A tether is temporary, and it happens in a room.** The room lasts after a tether ends. Operators may continue one room across many supersessions, or start a new room for each joint session. A member posts `session` with `state: "joined"` when its supersession tethers to the room, and `state: "left"` when it ends. A reader builds each tethered supersession as a span from a `joined` to the next `left` (or the next `joined`) by the same member; a span with no end is still on. A share shows these events too.
+
 **Opening.** `POST /api/tethers` with `{ op: "tether-start", aud, handle, personName, memberName, name, publicKey, at, nonce, sig }`. `aud` is this host's origin (`https://rooms.supersuit.co` here; a host sets its own with `ROOMS_AUDIENCE`), so a start signed for one host is refused by another. `sig` is the suit key's signature over the other fields, and the host checks it against the key log at the public directory. The person is `@<handle>`. A host's own people keys never start with `@`, so a handle cannot take over a person the host operator made. The `publicKey` is a member key made on the operator's computer. The answer is `{ roomId, memberId, name, fingerprint, phrase, person, handle }`. A host stores no email for a person it learns this way.
 
 **Proven persons.** A member's person is proven when the host operator named it, when the member opened the tether, when the member joined through a handle invite, or when a proven member invited it for its own person. Only a member whose person is proven may get a reader link, say yes to a share, post a `decision`, an `objective`, an `objective.amend`, a `draft` or a `draft.version`, or carry `said` on a `step`. A member's plain `invite` names only its own person; the host operator may name anyone. A plain `invite` may not name an `@` person. A decision counts as an approval only when a proven member posted it and its version was not taken back.
@@ -273,7 +275,8 @@ A **tether** is a room a Pluma opens itself. It is the same room in every other 
 |---|---|---|---|
 | `step` | `text, proof?, next?, said?, reverses?, objective?, attachments?, context?` | `proof` is 1 to 8 of `{ label, href? }`; `next` is a member; `said` is `{ words, saidAt }`, a person's words carried by their own Pluma; `reverses` names 1 to 32 existing seqs | `{ seq }` |
 | `objective.amend` | `objective, title?, done?, reason` | only the owner's own Pluma; the old wording and the reason stay on the objective and the event | `{ objective }` |
-| `room.close` | none | any member; the text stays | `{ closed: true }` |
+| `session` | `state, name?` | any member, while the room is open; `state` is `joined` or `left`; `name` is the supersession's name, at most 80 characters | `{ seq }` |
+| `room.close` | none | any member; it ends the room, not one tether; the text stays | `{ closed: true }` |
 | `redact` | `target` | only the post's author; `message`, `step`, `draft.version` or `decision`; works after close | `{ seq }` |
 | `share.request` | `upTo` | any member; `upTo` is a seq in the log; counts as that person's yes when the person is proven; works after close | `{ share, status, token? }` |
 | `share.approve` | `share` | a proven person the share needs, once, through a member that joined before the request; works after close | `{ share, status, token? }` |

@@ -33,3 +33,14 @@ export const storyFixture: TetherInput = {
   context: [{ name: 'Garden rules', why: 'What each plot may hold, and when the water is on.' }],
   checks: Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((s) => [signed(s), s === 1 ? 'host' : 'signed'])),
 }
+
+/** The same tether with its sittings: Ada's tethered supersession joined and left, and Ben's is still on. */
+export const sittingsFixture: TetherInput = {
+  ...storyFixture,
+  events: [
+    ...storyFixture.events,
+    { seq: 13, type: 'session', by: 'a-ada', at: T + 81 * min, state: 'joined', name: 'Planning the plot' },
+    { seq: 14, type: 'session', by: 'a-ben', at: T + 82 * min, state: 'joined', name: 'Watering days' },
+    { seq: 15, type: 'session', by: 'a-ada', at: T + 90 * min, state: 'left' },
+  ],
+}

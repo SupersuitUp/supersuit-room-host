@@ -604,7 +604,17 @@ const HANDLERS: Record<string, Handler> = {
     return { decision: id }
   },
 
-  /** Any member closes a tether (v0.4). The text stays, so both operators can still read the log. */
+  /**
+   * A tethered supersession joins or leaves the room (v0.4). A tether is temporary; the room keeps the
+   * record, so one room can hold many supersessions. Any member, while the room is open.
+   */
+  async session(tx, { roomId, room, member, post, sig, now }) {
+    if (post.state !== 'joined' && post.state !== 'left') throw new Refusal('state is joined or left', 400)
+    const name = optText(post.name, "the supersession's name", 80)
+    return { seq: emit(tx, roomId, room, now, { type: 'session', by: member.id, state: post.state, name, post, sig }) }
+  },
+
+  /** Any member closes the room (v0.4): the end of the room, not of one tether. The text stays, so its readers can still read it. */
   async 'room.close'(tx, { roomId, room, member, post, sig, now }) {
     tx.update(`rooms/${roomId}`, { state: 'closed', closedAt: now })
     emit(tx, roomId, room, now, { type: 'room.closed', by: member.id, post, sig })
@@ -1164,7 +1174,7 @@ function settleShare(tx: Tx, roomId: string, room: Data, now: number, id: string
   return { share: id, status: 'live', token }
 }
 
-const SHOWN_ON_A_SHARE = new Set(['step', 'decision', 'objective.created', 'objective.amended', 'objective.moved', 'room.closed', 'redact'])
+const SHOWN_ON_A_SHARE = new Set(['step', 'decision', 'objective.created', 'objective.amended', 'objective.moved', 'room.closed', 'redact', 'session'])
 export type SharedRoom = { room: Pick<Room, 'id' | 'name' | 'state' | 'createdAt'>; members: Member[]; objectives: Objective[]; events: RoomEvent[]; checks: Record<number, Check> }
 
 /** The objectives as the events up to some point made them: created, amended and moved, in order. */

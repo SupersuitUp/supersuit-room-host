@@ -1,7 +1,7 @@
 // src/lib/tether-log/model.ts
 // A room's events in, a tether log out. Pure: no clock, no network, no model call. The only judgment here
 // is which event a person reads as an entry; "whose move" comes from `next` and never from a guess.
-import type { Check, ConversationLine, Entry, EntryKind, Open, Proof, Settled, Side, Standing, TetherEvent, TetherInput, TetherLogModel, TetherMember } from './types.ts'
+import type { Check, ConversationLine, Sitting, Entry, EntryKind, Open, Proof, Settled, Side, Standing, TetherEvent, TetherInput, TetherLogModel, TetherMember } from './types.ts'
 
 const ENTRY_TYPES = new Set(['step', 'decision', 'draft.version', 'objective.amended', 'room.closed'])
 const NOT_POSTS = new Set(['host'])
@@ -92,6 +92,20 @@ export function tetherLog(input: TetherInput): TetherLogModel {
     return []
   })
 
+  // A tether is temporary and the room keeps the record: each session event opens or closes one span.
+  const sittings: Sitting[] = []
+  const openOf = new Map<string, Sitting>()
+  for (const e of events) {
+    if (e.type !== 'session' || e.redacted) continue
+    const open = openOf.get(e.by)
+    if (open) { open.to = e.at; open.toSeq = e.seq; openOf.delete(e.by) }
+    if (e.state === 'joined') {
+      const s: Sitting = { memberId: e.by, who: nameOf(e.by), ...(typeof e.name === 'string' ? { name: e.name } : {}), from: e.at, fromSeq: e.seq, to: null, toSeq: null }
+      sittings.push(s)
+      openOf.set(e.by, s)
+    }
+  }
+
   const count = (s: Side) => entries.filter((e) => e.side === s).length
   const sideCount = (m: TetherMember, s: Side) => ({ name: m.name, answersTo: firstName(m), count: count(s), lastSeenAt: m.lastSeenAt })
   const active = members.filter((m) => !m.retired)
@@ -100,6 +114,6 @@ export function tetherLog(input: TetherInput): TetherLogModel {
     people: active.map(firstName), from: room.createdAt, to: lastAt,
     standing, settled, open, story,
     left: sideCount(members[0], 'left'), right: members[1] ? sideCount(members[1], 'right') : null, handoffs,
-    entries, conversation, library: (input.context ?? []).filter((c) => !c.retired), signatures,
+    entries, conversation, library: (input.context ?? []).filter((c) => !c.retired), signatures, sittings,
   }
 }

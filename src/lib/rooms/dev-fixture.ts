@@ -79,10 +79,13 @@ export async function seedDevFixture(): Promise<{ ctx: rooms.Ctx; roomId: string
   // v0.4: the room is a tether, so /r/<id> draws the tether log, with steps, a reversal, a person's
   // words and whose move is next. Its shared page needs only Ada's yes, because Ben's is a test stand-in.
   await ctx.store.transaction(async (tx) => { tx.update(`rooms/${roomId}`, { tether: true }) })
+  await ada('session', { state: 'joined', name: 'Planning the lines' })
+  await stand('session', { state: 'joined', name: 'Reading the brief' })
   const split = (await stand('step', { text: 'Proposed a split: Ada writes the lines, Ben checks them.' })) as { seq: number }
   await ada('step', { text: 'Ada read the brief. Page 2 changes the plan.', said: { words: 'does the split help us', saidAt: new Date().toISOString() } })
   await ada('step', { text: 'Dropped the split. One side writes, and the other reads.', reverses: [split.seq] })
   await ada('step', { text: 'Rewrote the opening to match page 2.', proof: [{ label: 'draft v2' }], next: (await rooms.read(ctx, { kind: 'person', person: 'ada' }, roomId, 0)).members.find((m) => m.test)!.id })
+  await stand('session', { state: 'left' })
   const upTo = (await ctx.store.get(`rooms/${roomId}`))!.seq as number
   const { token: shareToken } = (await ada('share.request', { upTo })) as { token: string }
   await ctx.store.transaction(async (tx) => { tx.set(`sessions/${rooms.sha256(DEV_SESSION)}`, { person: 'ada', expiresAt: Date.now() + rooms.SESSION_MS }) })

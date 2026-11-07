@@ -15,6 +15,8 @@ export function rel(at: number, now: number): string {
 }
 
 export const abs = (at: number) => new Date(at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+/** The time of day alone, in the reader's zone: "3:14 PM". */
+export const clock = (at: number) => new Date(at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
 export const dayLabel = (at: number) => new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 export const dayKey = (at: number) => { const d = new Date(at); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}` }
 export function dayName(at: number, now: number): string {

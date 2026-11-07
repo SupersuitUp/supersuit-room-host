@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { layout } from './layout.ts'
 import { tetherLog } from './model.ts'
-import { storyFixture } from './story-fixture.ts'
+import { storyFixture, sittingsFixture } from './story-fixture.ts'
 import { TetherLogView } from './view.tsx'
 import { readFileSync } from 'node:fs'
 
@@ -22,9 +22,9 @@ describe('layout', () => {
 })
 
 describe('the order on a phone', () => {
-  it('runs name, intent, standing, actions, settled, story, entries', () => {
+  it('runs Room, the room\'s name, intent, standing, actions, settled, story, entries', () => {
     const at = (s: string) => member.indexOf(s)
-    const order = [at('Tethered supersession'), at(model.intent.slice(0, 20)), at('Waiting on Ben'), at('Check signatures'), at('Settled'), at('The story so far'), at('id="tl-e7"')]
+    const order = [at('>Room<'), at(model.name), at(model.intent.slice(0, 20)), at('Waiting on Ben'), at('Check signatures'), at('Settled'), at('The story so far'), at('id="tl-e7"')]
     expect(order).toEqual([...order].sort((a, b) => a - b))
     expect(order.every((n) => n >= 0)).toBe(true)
   })
@@ -110,5 +110,33 @@ describe('a failed signature', () => {
     const html = renderToStaticMarkup(<TetherLogView model={bad} mode="member" checkedBy="host" />)
     expect(html).toContain('1 post failed its check')
     expect(html).toContain('tl-failed')
+  })
+})
+
+describe('a room keeps the record; a tether is temporary', () => {
+  const sit = tetherLog(sittingsFixture)
+  const html = renderToStaticMarkup(<TetherLogView model={sit} mode="member" checkedBy="host" />)
+  const sharedSit = renderToStaticMarkup(<TetherLogView model={sit} mode="shared" checkedBy="host" aboutHref="https://rooms.supersuit.co/about" />)
+  it('the room\'s name is the large title, under a "Room" label with its ⓘ', () => {
+    expect(html).toMatch(/<h1 class="tl-intent">The shared garden plot<\/h1>/)
+    expect(html).toMatch(/<b><span>Room<a class="tl-i" href="https:\/\/wiki\.supersuit\.co\/concepts\/tethered-supersession"/)
+  })
+  it('counts the tethered supersessions', () => {
+    // The defined word is its own element (it carries an ⓘ), so the count is read as text.
+    const text = (h: string) => h.replace(/<[^>]+>/g, '')
+    expect(text(html)).toContain('2 tethered supersessions')
+    expect(text(renderToStaticMarkup(<TetherLogView model={{ ...sit, sittings: sit.sittings.slice(0, 1) }} mode="member" checkedBy="host" />))).toMatch(/1 tethered supersession(?!s)/)
+  })
+  it('marks where each one started and ended, between the entries, on a member\'s page and a shared page', () => {
+    for (const page of [html, sharedSit]) {
+      expect(page).toContain('Ada&#x27;s Pluma tethered: Planning the plot')
+      expect(page).toContain('Ada&#x27;s Pluma ended: Planning the plot')
+      expect(page).toContain('Ben&#x27;s Pluma tethered: Watering days')
+    }
+    expect(html.indexOf('ended: Planning the plot')).toBeLessThan(html.indexOf('id="tl-e7"'))
+  })
+  it('How to read this page says a tether is temporary and the room keeps the record', () => {
+    expect(html).toMatch(/is temporary\./)
+    expect(html).toContain('keeps the record')
   })
 })

@@ -40,10 +40,14 @@ export type Settled = { text: string; person: boolean; ref: string }
 export type Open = { text: string; ref: string }
 export type Signatures = { total: number; signed: number; failed: number; redacted: number }
 
+/** One tethered supersession in the room: from its join to its leave; to is null while it is still on. */
+export type Sitting = { memberId: string; who: string; name?: string; from: number; fromSeq: number; to: number | null; toSeq: number | null }
+
 export type TetherLogModel = {
   name: string; intent: string; done: string; people: string[]
   from: number; to: number
   standing: Standing; settled: Settled[]; open: Open[]; story: string[]
   left: SideCount; right: SideCount | null; handoffs: number
   entries: Entry[]; conversation: ConversationLine[]; library: TetherContextItem[]; signatures: Signatures
+  sittings: Sitting[]
 }
