@@ -77,6 +77,33 @@ describe('a shared page', () => {
   })
 })
 
+describe('what the screenshots showed (2026-11-07)', () => {
+  it('a said entry keeps what its Pluma did under the person\'s words', () => {
+    expect(member).toContain('Ben questioned the split.')
+  })
+  it('says "No reason on record." only when something was rejected', () => {
+    const plain = tetherLog({ ...storyFixture, events: storyFixture.events.map((e) => (e.seq === 10 ? { ...e, reason: undefined, rejected: undefined } : e)) })
+    expect(renderToStaticMarkup(<TetherLogView model={plain} mode="member" checkedBy="host" />)).not.toContain('No reason on record.')
+  })
+  it('names one day when the log spans one day', () => {
+    const oneDay = { ...model, to: model.from + 60_000 }
+    expect(renderToStaticMarkup(<TetherLogView model={oneDay} mode="member" checkedBy="host" />)).not.toMatch(/Nov \d+ to Nov/)
+  })
+  it('a shared page keeps the bar short and defines the name in the lead', () => {
+    const bar = shared.slice(shared.indexOf('tl-bar'), shared.indexOf('</div>', shared.indexOf('tl-bar')))
+    expect(bar).not.toContain('(')
+    expect(shared).toContain('tethered supersession (two conversations connected')
+  })
+})
+
+describe('the stylesheet', () => {
+  it('keeps the prototype\'s weight on element rules, so a class such as .tl-act always wins', () => {
+    const css = readFileSync('src/lib/tether-log/tether-log.css', 'utf8')
+    const heavy = css.split(/[{}]/).filter((_, i) => i % 2 === 0).flatMap((sel) => sel.split(',')).map((x) => x.trim()).filter((x) => /^\.tl\s+(button|a|h1|h2|h3|p|dialog)\b/.test(x))
+    expect(heavy).toEqual([])
+  })
+})
+
 describe('a failed signature', () => {
   it('shows a broken mark on the entry and says so at the top of the check', () => {
     const bad = tetherLog({ ...storyFixture, checks: { ...storyFixture.checks, 6: 'failed' } })

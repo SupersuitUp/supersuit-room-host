@@ -14,7 +14,8 @@ type Words = { seen: Set<TermKey>; mode: Mode }
 function say(parts: readonly Part[], w: Words): ReactNode[] {
   return parts.map((p, i) => {
     if (typeof p === 'string') return p
-    const t = TERMS[p.term], label = p.plural ? t.plural : t.label
+    const t = TERMS[p.term], full = p.plural ? t.plural : t.label
+    const label = p.lower ? full[0].toLowerCase() + full.slice(1) : full
     if (w.seen.has(p.term)) return <span key={i}>{label}</span>
     w.seen.add(p.term)
     if (w.mode === 'shared') return <span key={i}>{label} ({t.gloss})</span>
@@ -26,8 +27,8 @@ const Tick = ({ check }: { check: Check }) => check === 'failed'
   ? <span className="tl-failed" role="img" aria-label="This post failed its signature check">✕</span>
   : check === 'signed' ? <svg className="tl-tick" viewBox="0 0 17 15" aria-hidden="true"><path pathLength="1" d="M2 8.5 6.4 13 15 2" /></svg> : null
 
-const When = ({ at, now, stack = false }: { at: number; now: number; stack?: boolean }) => (
-  <span className={`tl-when ${stack ? 'tl-stack' : ''}`}>
+const When = ({ at, now, stack = false, right = false }: { at: number; now: number; stack?: boolean; right?: boolean }) => (
+  <span className={`tl-when ${stack ? 'tl-stack' : ''} ${right ? 'tl-right' : ''}`}>
     <time className="tl-rel" dateTime={new Date(at).toISOString()} suppressHydrationWarning>{rel(at, now)}</time>
     <time className="tl-abs" dateTime={new Date(at).toISOString()} suppressHydrationWarning>{abs(at)}</time>
   </span>
@@ -42,7 +43,7 @@ function EntryBody({ e, now, open }: { e: Entry; now: number; open(e: Entry): vo
   if (e.kind === 'said') return (
     <><button type="button" className={`tl-said ${e.no % 2 ? 'tl-b' : ''}`} id={`tl-e${e.no}`} data-strike onClick={() => open(e)} aria-label={`Entry ${e.no}, words from ${e.saidBy}, carried by ${e.carriedBy}. Open proof and signature.`}>
       <span className="tl-who"><span>{e.saidBy}, No. {e.no}</span><Tick check={e.check} /></span><When at={e.at} now={now} stack />
-      <q>{e.words}</q><small>{`Carried by ${e.carriedBy}`}</small>
+      <q>{e.words}</q>{e.text && <small className="tl-did">{e.text}</small>}<small>{`Carried by ${e.carriedBy}`}</small>
     </button><Reversal e={e} /></>
   )
   return (
@@ -63,7 +64,7 @@ function Stamp({ e, now, open, noReason }: { e: Entry; now: number; open(e: Entr
       <span className="tl-foot">
         <span className="tl-seals"><span className="tl-seal">{e.saidBy?.[0]}</span></span>
         <small style={{ textAlign: 'right' }}>{`${e.verdict === 'approve' ? 'Approved' : 'Asked for changes'}. Carried by ${e.carriedBy}`}<br />
-          {e.rejected && <>Rejected: {e.rejected}<br /></>}{e.reason ?? noReason}<br /><Reversal e={e} /></small>
+          {e.rejected && <>Rejected: {e.rejected}<br />{e.reason ?? noReason}<br /></>}{!e.rejected && e.reason && <>{e.reason}<br /></>}<Reversal e={e} /></small>
       </span>
       <button type="button" className="tl-hit" id={`tl-e${e.no}`} data-n={e.no} onClick={() => open(e)} aria-label={`Entry ${e.no}, decision by ${e.saidBy}, carried by ${e.carriedBy}. Open proof and signature.`} />
     </div></div>
@@ -174,13 +175,14 @@ export function TetherLogView({ model: m, mode, checkedBy, aboutHref, notice, ho
       <div className="tl-wrap">
         <header className="tl-title">
           <div className="tl-lead">
-            <div className="tl-bar"><b>{say([{ term: 'tetheredSupersession' }], w)}</b><span suppressHydrationWarning>{dayLabel(m.from)} to {dayLabel(m.to)}</span></div>
+            {/* A shared page keeps the bar to the name; its lead sentence defines it. */}
+            <div className="tl-bar"><b>{mode === 'shared' ? TERMS.tetheredSupersession.label : say([{ term: 'tetheredSupersession' }], w)}</b><span suppressHydrationWarning>{dayKey(m.from) === dayKey(m.to) ? dayLabel(m.from) : `${dayLabel(m.from)} to ${dayLabel(m.to)}`}</span></div>
             <p className="tl-done">{say(COPY.whatIs, w)}{m.people.join(' and ')}.</p>
-            {mode === 'shared' && <p className="tl-done">{say(COPY.sharedLead, w)} {aboutHref && <a href={aboutHref}>{say(COPY.sharedAbout, w)}</a>}</p>}
+            {mode === 'shared' && <p className="tl-done">{say(COPY.sharedLead, w)} {aboutHref && <><a href={aboutHref}>{say(COPY.sharedAbout, w)}</a>.</>}</p>}
             <h1 className="tl-intent">{m.intent}</h1>
             <p className="tl-done"><b>Done means:</b> {m.done}</p>
             <div className="tl-stands">
-              <div className="tl-state">{m.standing.state === 'Waiting' && <span className="tl-gem" />}{m.standing.state}<When at={m.standing.at} now={now} stack /></div>
+              <div className="tl-state">{m.standing.state === 'Waiting' && <span className="tl-gem" />}{m.standing.state}<When at={m.standing.at} now={now} stack right /></div>
               <p>{m.standing.line}</p>
               {mode === 'member' && m.right && <p suppressHydrationWarning>{m.left.name}: {m.left.lastSeenAt ? `last seen ${rel(m.left.lastSeenAt, now)}` : 'not seen yet'}. {m.right.name}: {m.right.lastSeenAt ? `last seen ${rel(m.right.lastSeenAt, now)}` : 'not seen yet'}.</p>}
             </div>

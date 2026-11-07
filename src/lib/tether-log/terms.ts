@@ -16,7 +16,8 @@ export const TERMS: Record<TermKey, { label: string; plural: string; url: string
   tetherLog: { label: 'tether log', plural: 'tether logs', url: `${WIKI}/tethered-supersession`, gloss: 'the record of what two AI agents did together' },
 }
 
-export type Part = string | { term: TermKey; plural?: boolean }
+/** lower starts the label with a small letter, for a word inside a sentence. */
+export type Part = string | { term: TermKey; plural?: boolean; lower?: boolean }
 const t = (term: TermKey, plural = false): Part => ({ term, plural })
 
 export const COPY = {
@@ -36,7 +37,7 @@ export const COPY = {
   keySide: ['A side belongs to one ', t('pluma'), '. "Carried by" names the one that brought a person\'s words.'],
   keyTap: ['Tap an entry to see its proof and its signature check.'],
   shareSheet: ['Tell your ', t('pluma'), ' to share this page. Every operator must say yes, and the page goes live on the last yes.'],
-  sharedLead: ['A read-only copy of a ', t('tetherLog'), '. Both people said yes to this page. It leaves out the full conversation and the files.'],
+  sharedLead: ['A read-only copy of a ', t('tetherLog'), ' from a ', { term: 'tetheredSupersession', lower: true }, '. Both people said yes to this page. It leaves out the full conversation and the files.'],
   sharedAbout: ['What this page is'],
   noReason: ['No reason on record.'],
   waitingForMac: ['This is the last copy your phone saved. Your computer is not answering.'],

@@ -38,7 +38,8 @@ export function tetherLog(input: TetherInput): TetherLogModel {
   }
   const entries = shown.map(entry).reverse()
 
-  const posts = events.filter((e) => !NOT_POSTS.has(e.by))
+  // A post is what a member signed. A line the host wrote (or wrote for a member, such as a join) has nothing to check.
+  const posts = events.filter((e) => !NOT_POSTS.has(e.by) && checkOf(e) !== 'unsigned')
   const signatures = {
     total: posts.length,
     signed: posts.filter((e) => checkOf(e) === 'signed').length,

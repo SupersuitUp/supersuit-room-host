@@ -24,9 +24,10 @@
 }
 
 
-.tl button{font:inherit;color:inherit;background:none;border:0;padding:0;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
-.tl button:focus-visible,.tl a:focus-visible{outline:3px solid var(--navy);outline-offset:2px;border-radius:2px}
-.tl h1,.tl h2,.tl h3,.tl p{margin:0;font-weight:400}
+/* Element rules sit under :where(.tl), so they weigh what the prototype's bare element rules weighed and any class wins. */
+:where(.tl) button{font:inherit;color:inherit;background:none;border:0;padding:0;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
+:where(.tl) button:focus-visible,:where(.tl) a:focus-visible{outline:3px solid var(--navy);outline-offset:2px;border-radius:2px}
+:where(.tl) h1,:where(.tl) h2,:where(.tl) h3,:where(.tl) p{margin:0;font-weight:400}
 .tl-wrap{max-width:1040px;margin:0 auto;overflow-x:clip}
 
 /* The title page */
@@ -185,8 +186,8 @@ a.tl-rev{display:inline-block}
 .tl-act:active{transform:translateY(1px)}
 
 /* The voucher: what backs an entry */
-.tl dialog{border:0;padding:0;color:var(--ink);background:none;max-width:none;max-height:none;width:100%;margin:auto 0 0}
-.tl dialog::backdrop{background:rgba(34,50,74,.46)}
+:where(.tl) dialog{border:0;padding:0;color:var(--ink);background:none;max-width:none;max-height:none;width:100%;margin:auto 0 0}
+:where(.tl) dialog::backdrop{background:rgba(34,50,74,.46)}
 .tl-voucher{background:var(--card);max-width:560px;margin:0 auto;padding:22px 18px calc(18px + env(safe-area-inset-bottom));max-height:86vh;overflow:auto;
   -webkit-mask:radial-gradient(circle 6px at 10px 0,transparent 97%,#000) -10px 0/20px 100% repeat-x;mask:radial-gradient(circle 6px at 10px 0,transparent 97%,#000) 0 0/20px 100% repeat-x}
 .tl-voucher h2{font:400 32px/36px var(--serif)}
@@ -244,3 +245,6 @@ a.tl-rev{display:inline-block}
 
 .tl-i{margin-left:3px;font:500 12px/1 var(--sans);text-decoration:none;color:var(--navy)}
 .tl-failed{color:#a12a1c;font-weight:600}
+.tl-done a{color:var(--navy);font-weight:500;text-decoration:underline;text-underline-offset:3px}
+.tl-said small.tl-did{margin-bottom:6px;font-weight:400}
+.tl-lead .tl-intent{margin-top:10px}

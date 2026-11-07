@@ -50,6 +50,10 @@ describe('tetherLog, on the shape of a real tether', () => {
     expect(m.signatures).toMatchObject({ total: 11, signed: 11, failed: 0 })
     expect(tetherLog({ ...S, checks: { ...S.checks, 6: 'failed' } }).signatures.failed).toBe(1)
   })
+  it('counts only posts: a line the host wrote for a member, with no signature to check, is not a post', () => {
+    const withJoin = tetherLog({ ...S, checks: { ...S.checks, 2: 'unsigned', 3: 'unsigned' } })
+    expect(withJoin.signatures).toMatchObject({ total: 9, signed: 9, failed: 0 })
+  })
   it('keeps one line for a redaction and nothing of what it removed', () => {
     const gone = { ...S, events: S.events.map((e) => (e.seq === 6 ? { seq: 6, type: 'step', by: 'a-ada', at: e.at, redacted: { by: 'a-ada', at: e.at + 1 } } : e)), checks: { ...S.checks, 6: 'redacted' as const } }
     const e = tetherLog(gone).entries.find((x) => x.seq === 6)!
