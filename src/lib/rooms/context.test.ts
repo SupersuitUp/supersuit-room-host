@@ -294,8 +294,8 @@ describe('fetching: a 15-minute signed address, to the room\'s readers only', ()
 })
 
 describe('housekeeping: the host deletes what its declaration says, and enforces only the limits it declares', () => {
-  it('declares protocol 0.3, no limits, and the retention it keeps', () => {
-    expect(rooms.HOUSEKEEPING_DECLARATION).toEqual({ protocol: '0.3', housekeeping: { limits: {}, whileOpen: 'keep', afterCloseDays: 30, unclaimedUploadDays: 7, memberMayDelete: true, ownerMayDeleteRoom: true } })
+  it('declares protocol 0.4, no limits, and the retention it keeps', () => {
+    expect(rooms.HOUSEKEEPING_DECLARATION).toEqual({ protocol: '0.4', docs: 'https://rooms.supersuit.co/about', housekeeping: { limits: {}, whileOpen: 'keep', textAfterClose: 'keep', afterCloseDays: 30, unclaimedUploadDays: 7, memberMayDelete: true, ownerMayDeleteRoom: true } })
   })
 
   it('deletes uploads no context.add claimed within 7 days, keeps younger ones and listed ones', async () => {

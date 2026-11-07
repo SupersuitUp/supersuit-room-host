@@ -21,7 +21,8 @@ export async function GET(req: Request, { params }: P) {
         'content-type': a.type,
         'content-length': String(a.size),
         'content-disposition': `inline; filename="${a.sha256.slice(0, 12)}.${EXT[a.type] ?? 'bin'}"`,
-        'cache-control': 'private, max-age=3600',
+        // no-store (v0.4): a post can be taken back, and a cached copy would outlive it.
+        'cache-control': 'no-store',
         etag: `"${a.sha256}"`,
         'content-security-policy': "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox",
       },

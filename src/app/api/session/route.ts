@@ -1,6 +1,6 @@
 import { getCtx, SESSION_COOKIE } from '@/lib/server/ctx'
 import { sessionToken, verifyIdToken } from '@/lib/server/auth'
-import { handle, json, body } from '@/lib/server/http'
+import { handle, json, sameSiteBody } from '@/lib/server/http'
 import * as rooms from '@/lib/rooms/service'
 
 export const runtime = 'nodejs'
@@ -9,7 +9,7 @@ export const runtime = 'nodejs'
 // person on this host gets a session; everyone else gets the same 403, so nothing about the host leaks.
 export async function POST(req: Request) {
   return handle(async () => {
-    const b = await body(req)
+    const b = await sameSiteBody(req)
     const ctx = await getCtx()
     const v = typeof b.idToken === 'string' ? await verifyIdToken(b.idToken) : null
     const person = v?.email_verified && v.email ? await rooms.personForEmail(ctx, v.email) : null

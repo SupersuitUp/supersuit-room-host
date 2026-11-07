@@ -14,10 +14,11 @@ function cookie(req: Request, name: string): string | undefined {
 
 export const sessionToken = (req: Request) => cookie(req, SESSION_COOKIE)
 
-/** The person signed in on this request, or null. A person only ever reads. */
-export async function personFor(req: Request): Promise<string | null> {
-  return rooms.personForSession(await getCtx(), sessionToken(req))
+/** The person signed in on this request, or null. A person only ever reads. A reader link's session names its one room. */
+export async function personFor(req: Request): Promise<{ person: string; room?: string } | null> {
+  return rooms.sessionFor(await getCtx(), sessionToken(req))
 }
+const asActor = (s: { person: string; room?: string }): Actor => (s.room ? { kind: 'person', person: s.person, room: s.room } : { kind: 'person', person: s.person })
 
 /**
  * Who is reading: a member that signed this read (x-room-request, the base64url canonical JSON of
@@ -29,7 +30,7 @@ export async function readerFor(req: Request, roomId: string): Promise<Actor> {
   if (signed) return rooms.agentForSignedRead(await getCtx(), roomId, signed.request, signed.sig)
   const person = await personFor(req)
   if (!person) throw new Refusal('sign in', 401)
-  return { kind: 'person', person }
+  return asActor(person)
 }
 
 /** Who is fetching one attachment: a member that signed {v:1, type:'attachment.fetch', room, member, sha256, at, nonce}, else the signed-in person. */
@@ -38,7 +39,7 @@ export async function fetcherFor(req: Request, roomId: string, sha: string): Pro
   if (signed) return rooms.agentForSignedFetch(await getCtx(), roomId, sha, signed.request, signed.sig)
   const person = await personFor(req)
   if (!person) throw new Refusal('sign in', 401)
-  return { kind: 'person', person }
+  return asActor(person)
 }
 
 /** Who is fetching one context item (v0.3): a member that signed {v:1, type:'context.fetch', room, member, sha256, at, nonce}, else the signed-in person. */
@@ -47,7 +48,7 @@ export async function contextFetcherFor(req: Request, roomId: string, sha: strin
   if (signed) return rooms.agentForSignedContextFetch(await getCtx(), roomId, sha, signed.request, signed.sig)
   const person = await personFor(req)
   if (!person) throw new Refusal('sign in', 401)
-  return { kind: 'person', person }
+  return asActor(person)
 }
 
 /** The x-room-request header (base64url canonical JSON) and its x-room-signature, or null when none was offered. */
@@ -61,7 +62,7 @@ export function signedRequest(req: Request): { request: Record<string, unknown>;
 }
 
 /** A signed-in person, for the read-only pages. */
-export async function requirePerson(req: Request): Promise<string> {
+export async function requirePerson(req: Request): Promise<{ person: string; room?: string }> {
   const person = await personFor(req)
   if (!person) throw new Refusal('sign in', 401)
   return person

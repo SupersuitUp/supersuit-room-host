@@ -13,4 +13,11 @@ describe('the memory store behaves like Firestore where it matters', () => {
     await s.transaction(async (tx) => { tx.set('a/2', { x: 2 }); throw new Error('no') }).catch(() => {})
     expect(await s.get('a/2')).toBeNull()
   })
+
+  it('deletes a document inside a transaction', async () => {
+    const s = new MemoryStore()
+    await s.transaction(async (tx) => { tx.set('a/1', { x: 1 }) })
+    await s.transaction(async (tx) => { tx.delete('a/1') })
+    expect(await s.get('a/1')).toBeNull()
+  })
 })

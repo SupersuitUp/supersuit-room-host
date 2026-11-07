@@ -1,5 +1,5 @@
 // A seeded room for working on the page with `next dev`: ROOMS_DEV_FIXTURE=1 pnpm dev, then open
-// /r/<printed id> with the cookie room-session=dev-session. Sample people only. It is refused
+// /r/<printed id> with the cookie room-session=dev-session, or the printed /s/<token> with no cookie. Sample people only. It is refused
 // outside development, so a production host can never serve it.
 import { generateKeyPairSync, randomBytes, sign } from 'node:crypto'
 import { MemoryStore } from './memory-store'
@@ -25,7 +25,7 @@ class DevObjectStore extends MemoryObjectStore {
   }
 }
 
-export async function seedDevFixture(): Promise<{ ctx: rooms.Ctx; roomId: string }> {
+export async function seedDevFixture(): Promise<{ ctx: rooms.Ctx; roomId: string; shareToken: string }> {
   const objects = new DevObjectStore()
   const ctx: rooms.Ctx = { store: new MemoryStore(), now: () => Date.now(), objects }
   await rooms.addPerson(ctx, { key: 'ada', name: 'Ada', emails: ['ada@example.com'] })
@@ -59,7 +59,8 @@ export async function seedDevFixture(): Promise<{ ctx: rooms.Ctx; roomId: string
   const ada = await join("Ada's Pluma", 'ada')
   const stand = await join("Stand-in for Ben's Pluma", 'ben', true)
   const { objective } = (await ada('objective', { title: 'The shared lines', owner: 'ada', done: 'Ada decides on the exact words.' })) as { objective: string }
-  await stand('objective', { title: "Ben's profile", owner: 'ben', done: 'Ben decides.' })
+  // A test stand-in speaks for no one, so objectives, drafts and a person's words come from Ada's Pluma (v0.4).
+  await ada('objective', { title: 'The opening still', owner: 'ada', done: 'Ada picks the frame.' })
   await ada('objective.move', { objective, status: 'claimed' })
   await ada('message', { text: 'Claimed The shared lines. A first version is coming for Ada.' })
   await stand('message', { text: 'Test stand-in, speaking for no one.' })
@@ -75,6 +76,18 @@ export async function seedDevFixture(): Promise<{ ctx: rooms.Ctx; roomId: string
   const old = await stand.bring(Buffer.from('an outline that was replaced'), { name: 'old-outline.txt', contentType: 'text/plain', why: 'The first outline, before the brief.' })
   await stand('context.retire', { sha256: old })
   await ada('message', { text: 'Working from the brief and the opening still.', context: [brief, still] })
+  // v0.4: the room is a tether, so /r/<id> draws the tether log, with steps, a reversal, a person's
+  // words and whose move is next. Its shared page needs only Ada's yes, because Ben's is a test stand-in.
+  await ctx.store.transaction(async (tx) => { tx.update(`rooms/${roomId}`, { tether: true }) })
+  await ada('session', { state: 'joined', name: 'Planning the lines' })
+  await stand('session', { state: 'joined', name: 'Reading the brief' })
+  const split = (await stand('step', { text: 'Proposed a split: Ada writes the lines, Ben checks them.' })) as { seq: number }
+  await ada('step', { text: 'Ada read the brief. Page 2 changes the plan.', said: { words: 'does the split help us', saidAt: new Date().toISOString() } })
+  await ada('step', { text: 'Dropped the split. One side writes, and the other reads.', reverses: [split.seq] })
+  await ada('step', { text: 'Rewrote the opening to match page 2.', proof: [{ label: 'draft v2' }], next: (await rooms.read(ctx, { kind: 'person', person: 'ada' }, roomId, 0)).members.find((m) => m.test)!.id })
+  await stand('session', { state: 'left' })
+  const upTo = (await ctx.store.get(`rooms/${roomId}`))!.seq as number
+  const { token: shareToken } = (await ada('share.request', { upTo })) as { token: string }
   await ctx.store.transaction(async (tx) => { tx.set(`sessions/${rooms.sha256(DEV_SESSION)}`, { person: 'ada', expiresAt: Date.now() + rooms.SESSION_MS }) })
-  return { ctx, roomId }
+  return { ctx, roomId, shareToken }
 }

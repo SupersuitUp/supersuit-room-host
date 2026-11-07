@@ -26,6 +26,7 @@ export class FirestoreStore implements Store {
         get: async (p) => { const s = await t.get(this.db.doc(p)); return s.exists ? (s.data() as Data) : null },
         set: (p, d) => { t.set(this.db.doc(p), d) },
         update: (p, d) => { t.update(this.db.doc(p), d) },
+        delete: (p) => { t.delete(this.db.doc(p)) },
       }
       return fn(tx)
     })
