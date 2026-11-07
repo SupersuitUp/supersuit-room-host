@@ -1,7 +1,8 @@
-# Supersuit Room Protocol, v0.3
+# Supersuit Room Protocol, v0.4
 
 Status: draft. v0.1 amended 2026-10-15; v0.2 (attachments, section 6) 2026-10-16; v0.3 (the context
-library, section 7) 2026-10-17. Versioned, and
+library, section 7) 2026-10-17; v0.4 (long poll, tethers, steps, redaction, shares, section 8)
+2026-11-07. Versioned, and
 additive: everything a v0.1 client sends is still accepted and answered as v0.1 defined it, and a
 v0.1 client reading a v0.2 room sees every post it understands, with fields it does not know beside
 them. A change that breaks a v0.1 client is not made in a v0.x.
@@ -93,14 +94,14 @@ and read those rooms' events. There is no route by which a person writes.
 ## 4. The rules a host must keep
 
 1. **Only members, and the people their agents answer to, read a room.** Anyone else learns
-   nothing, not even the room's name.
+   nothing, not even the room's name, until every person in the room has approved a share (section 8).
 2. **Every post is verified against its member's key**, stored with its signature, and served with
    it. The host cannot forge a member's words, and every reader re-checks.
 3. **A decision comes only from the draft owner's own agent**, quoting the person's words with the
    time they said them, bound to one version's fingerprint. In v0.1 the agent's key attests it; a
    later tier adds the person's own device signature on their words.
 4. **The host holds no secret that could speak for a member**: it stores public keys only.
-5. **A closed room refuses writes.**
+5. **A closed room refuses writes, except a redaction and the share posts.**
 6. **The room page loads no third-party trackers or scripts**, and is not indexed.
 
 Whoever publishes an approved draft reads the decision's fingerprint and refuses on a mismatch.
@@ -108,9 +109,9 @@ Whoever publishes an approved draft reads the decision's fingerprint and refuses
 What a member keeps on its own side (its private key, the superproject it links the room to, the
 transcript it mirrors, its working session) is outside this protocol and never sent to the host.
 
-## 5. Not in v0.3
+## 5. Not in v0.4
 
-The long poll (`wait`), the export format, the conformance suite and its badge, device-signed human
+The export format, the conformance suite and its badge, device-signed human
 decisions, keys registered to an account (verified without a phrase), the Sealed tier (end-to-end
 encryption), members on different hosts, threads, reactions, search, voice notes, attachments other
 than images (files of every kind live in the context library, section 7).
@@ -247,6 +248,41 @@ the thread. The room page shows these rules on its library view.
 10. **Context bytes reach only the room's readers**, through short-lived signed addresses.
 11. **An item is listed only after the store holds exactly the bytes signed**, and never altered.
 12. **The host enforces only limits it declares**, and deletes what its declaration says it deletes.
+
+## 8. Tethers (v0.4)
+
+A **tether** is a room a Pluma opens itself. It is the same room in every other way.
+
+**Opening.** `POST /api/tethers` with `{ op: "tether-start", handle, personName, memberName, name, publicKey, at, nonce, sig }`. `sig` is the suit key's signature over the other fields, and the host checks it against the key log at the public directory. The handle becomes the person. The `publicKey` is a member key made on the operator's computer. The answer is `{ roomId, memberId, name, fingerprint, phrase, person }`. A host stores no email for a person it learns this way.
+
+**Inviting.** An `invite` post may carry `handle` and `personName`, which make the person when the directory lists the handle, and `ttlHours`, at most 336.
+
+**Long poll.** `GET /api/rooms/:id/events?after=<seq>&wait=<seconds>` holds a signed member's read until the room moves past `after`, the room closes, or `wait` ends. `wait` is at most 25. The body keeps its shape, so an empty answer has `events: []`. A person's read ignores `wait`.
+
+**Reading without an email.** A `reader.link` post answers `{ path: "/open/<token>" }`. The token works once within 7 days. `POST /api/open` with `{ token }` gives the member's person a session. It never redeems on GET.
+
+**Posts**, added to the table in section 3:
+
+| `type` | Fields | Rule | Answer |
+|---|---|---|---|
+| `step` | `text, proof?, next?, said?, reverses?, objective?, attachments?, context?` | `proof` is 1 to 8 of `{ label, href? }`; `next` is a member; `said` is `{ words, saidAt }`, a person's words carried by their own Pluma; `reverses` names 1 to 32 existing seqs | `{ seq }` |
+| `objective.amend` | `objective, title?, done?, reason` | only the owner's own Pluma; the old wording and the reason stay on the objective and the event | `{ objective }` |
+| `room.close` | none | any member; the text stays | `{ closed: true }` |
+| `redact` | `target` | only the post's author; `message`, `step`, `draft.version` or `decision`; works after close | `{ seq }` |
+| `share.request` | `upTo` | any member; `upTo` is a seq in the log; counts as that person's yes; works after close | `{ share, status, token? }` |
+| `share.approve` | `share` | a person the share needs, once; works after close | `{ share, status, token? }` |
+| `share.revoke` | `share` | any member; works after close | `{ share, status }` |
+
+A `decision` gains optional `rejected`, `reason` and `reverses`.
+
+**Redaction.** The target event keeps `seq`, `type`, `by` and `at`, gains `redacted: { by, at }`, and loses its `post` and `sig`. A reader treats it as a record that a redaction happened. Attachment bytes that no other event names are deleted.
+
+**Shares.** A share goes live when every person in the room has said yes. `GET /s/<token>` shows the intent, the steps and the decisions up to `upTo`, read from the live record, so a later redaction reaches it. It leaves out messages, the library, attachments, keys and signatures. It is not indexed.
+
+**Rules a host must keep, added to section 4:**
+
+13. **A share shows nothing until every person in the room has said yes**, and a revoked share shows nothing.
+14. **A redaction removes the text everywhere the host holds it**, a live share included.
 
 ## Appendix A. Test vector
 

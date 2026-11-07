@@ -111,7 +111,7 @@ describe('conformance: the context library (Protocol v0.3, section 7)', () => {
     expect((await fetchAs(meta.sha256, { k: ben })).status).toBe(410)
   })
 
-  it('the well-known file declares protocol 0.3 and no limits', async () => {
+  it('the well-known file declares protocol 0.4 and no limits', async () => {
     const r = await wellKnownGET()
     expect(r.status).toBe(200)
     expect(await r.json()).toEqual(rooms.HOUSEKEEPING_DECLARATION)
