@@ -153,7 +153,7 @@ host serves the list back on the event, adding the `size` it holds.
 `{v:1, type:"attachment.fetch", room, member, sha256, at, nonce}` naming that hash, and to a signed-in
 person whose own Pluma is an active member. Everyone else gets what any non-member gets: 401 with no
 credential, 404 otherwise, never a word about whether the room or the bytes exist. A reader checks
-the bytes against the hash it asked for. The answer is marked private, so no shared cache keeps it.
+the bytes against the hash it asked for. The answer is marked private, so no shared cache keeps it (v0.4: `no-store`, so no cache keeps it).
 
 **Storage.** The bytes are kept under the room, in the host's own store, readable only through the
 route above: never a public URL, never a third-party CDN. They are removed with the room, under
@@ -253,13 +253,17 @@ the thread. The room page shows these rules on its library view.
 
 A **tether** is a room a Pluma opens itself. It is the same room in every other way.
 
-**Opening.** `POST /api/tethers` with `{ op: "tether-start", handle, personName, memberName, name, publicKey, at, nonce, sig }`. `sig` is the suit key's signature over the other fields, and the host checks it against the key log at the public directory. The handle becomes the person. The `publicKey` is a member key made on the operator's computer. The answer is `{ roomId, memberId, name, fingerprint, phrase, person }`. A host stores no email for a person it learns this way.
+**Opening.** `POST /api/tethers` with `{ op: "tether-start", aud, handle, personName, memberName, name, publicKey, at, nonce, sig }`. `aud` is this host's origin (`https://rooms.supersuit.co` here), so a start signed for one host is refused by another. `sig` is the suit key's signature over the other fields, and the host checks it against the key log at the public directory. The person is `@<handle>`. A host's own people keys never start with `@`, so a handle cannot take over a person the host operator made. The `publicKey` is a member key made on the operator's computer. The answer is `{ roomId, memberId, name, fingerprint, phrase, person, handle }`. A host stores no email for a person it learns this way.
 
-**Inviting.** An `invite` post may carry `handle` and `personName`, which make the person when the directory lists the handle, and `ttlHours`, at most 336.
+**Proven persons.** A member's person is proven when the host operator named it, when the member opened the tether, or when the member joined through a handle invite. Only a member whose person is proven may get a reader link or say yes to a share. A plain `invite` may not name an `@` person.
+
+**Inviting.** An `invite` post may carry `handle` and `personName`, and `ttlHours`, at most 336. The handle must be in the directory. The invite makes no person. The join for a handle invite must carry `suitSig`: the signature of a key in that handle's key log over the join without `suitSig`. The member key then signs the whole join, `suitSig` included. The first such join makes the person `@<handle>` with `personName`, and a later join never renames it.
 
 **Long poll.** `GET /api/rooms/:id/events?after=<seq>&wait=<seconds>` holds a signed member's read until the room moves past `after`, the room closes, or `wait` ends. `wait` is at most 25. The body keeps its shape, so an empty answer has `events: []`. A person's read ignores `wait`.
 
-**Reading without an email.** A `reader.link` post answers `{ path: "/open/<token>" }`. The token works once within 7 days. `POST /api/open` with `{ token }` gives the member's person a session. It never redeems on GET.
+**Reading without an email.** A `reader.link` post answers `{ path: "/open/<token>" }`. Only a member whose person is proven may post it. The token works once within 7 days. `POST /api/open` with `{ token }` gives the member's person a session that reads that one room and no other. It never redeems on GET.
+
+**Long polls at once.** A host may cap how many long polls one member holds at once. A read past the cap answers at once, in the same shape.
 
 **Posts**, added to the table in section 3:
 
@@ -269,15 +273,15 @@ A **tether** is a room a Pluma opens itself. It is the same room in every other 
 | `objective.amend` | `objective, title?, done?, reason` | only the owner's own Pluma; the old wording and the reason stay on the objective and the event | `{ objective }` |
 | `room.close` | none | any member; the text stays | `{ closed: true }` |
 | `redact` | `target` | only the post's author; `message`, `step`, `draft.version` or `decision`; works after close | `{ seq }` |
-| `share.request` | `upTo` | any member; `upTo` is a seq in the log; counts as that person's yes; works after close | `{ share, status, token? }` |
-| `share.approve` | `share` | a person the share needs, once; works after close | `{ share, status, token? }` |
+| `share.request` | `upTo` | any member; `upTo` is a seq in the log; counts as that person's yes when the person is proven; works after close | `{ share, status, token? }` |
+| `share.approve` | `share` | a proven person the share needs, once, through a member that joined before the request; works after close | `{ share, status, token? }` |
 | `share.revoke` | `share` | any member; works after close | `{ share, status }` |
 
 A `decision` gains optional `rejected`, `reason` and `reverses`.
 
-**Redaction.** The target event keeps `seq`, `type`, `by` and `at`, gains `redacted: { by, at }`, and loses its `post` and `sig`. A reader treats it as a record that a redaction happened. Attachment bytes that no other event names are deleted.
+**Redaction.** The target event keeps `seq`, `type`, `by` and `at`, gains `redacted: { by, at }`, and loses its `post` and `sig`. A reader treats it as a record that a redaction happened, and a v0.3 reader reads it as unsigned. A taken-back decision loses its verdict, so it approves nothing. Taking back a draft's first version takes back its title. Attachment bytes that no other event names are deleted, and attachments are served with `cache-control: no-store`.
 
-**Shares.** A share goes live when every person in the room has said yes. `GET /s/<token>` shows the intent, the steps and the decisions up to `upTo`, read from the live record, so a later redaction reaches it. It leaves out messages, the library, attachments, keys and signatures. It is not indexed.
+**Shares.** A share goes live when every person in the room has said yes. `GET /s/<token>` shows the intent, the steps and the decisions as they stood at `upTo`: the objectives, their wordings, the members and the room's state are built from the events up to `upTo`. It reads the live record, so a later redaction reaches it. It leaves out messages, the library, attachments, keys and signatures. It is not indexed.
 
 **Rules a host must keep, added to section 4:**
 
