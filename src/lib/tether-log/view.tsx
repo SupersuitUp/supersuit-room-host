@@ -203,7 +203,7 @@ export function TetherLogView({ model: m, mode, checkedBy, aboutHref, notice, ho
             {/* A shared page keeps the bar to the name; its lead sentence defines it. */}
             {/* The room is the place; a tether is temporary. A shared page keeps the bar to the word. */}
             <div className="tl-bar"><b>{mode === 'shared' ? TERMS.room.label : say([{ term: 'room' }], w)}</b><span suppressHydrationWarning>{dayKey(m.from) === dayKey(m.to) ? dayLabel(m.from) : `${dayLabel(m.from)} to ${dayLabel(m.to)}`}</span></div>
-            <p className="tl-done">{say(COPY.whatIs, w)}{m.people.join(' and ')}.</p>
+            {m.right && <p className="tl-done">{say(COPY.whatIs, w)}{m.people.join(' and ')}.</p>}
             {mode === 'shared' && <p className="tl-done">{say(COPY.sharedLead, w)} {aboutHref && <><a href={aboutHref}>{say(COPY.sharedAbout, w)}</a>.</>}</p>}
             <p className="tl-done tl-count">{m.sittings.length} {say([{ term: 'tetheredSupersession', plural: m.sittings.length !== 1, lower: true }], w)}</p>
             <h1 className="tl-intent">{m.name}</h1>

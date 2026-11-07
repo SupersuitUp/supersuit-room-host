@@ -13,7 +13,8 @@ export function tetherLog(input: TetherInput): TetherLogModel {
   const drafts = input.drafts ?? []
   const checks = input.checks ?? {}
   const memberOf = (id: string) => members.find((m) => m.id === id)
-  const nameOf = (id: string) => (id === 'host' ? 'The host' : memberOf(id)?.name ?? 'A former member')
+  const nameOf = (id: string) => (id === 'host' ? 'The host' : memberOf(id)?.name ?? 'another member')
+  // A shared page leaves some members out, so an id it does not show is "another member", never "former".
   const sideOf = (id: string): Side => (members.findIndex((m) => m.id === id) % 2 === 1 ? 'right' : 'left')
   const checkOf = (e: TetherEvent): Check => checks[e.seq] ?? 'unsigned'
 

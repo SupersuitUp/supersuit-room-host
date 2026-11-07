@@ -140,3 +140,17 @@ describe('a room keeps the record; a tether is temporary', () => {
     expect(html).toContain('keeps the record')
   })
 })
+
+describe('what the room screenshots showed (2026-11-07)', () => {
+  // A shared page leaves out a stand-in, so its log can name a member the page does not show.
+  const lone = tetherLog({ ...storyFixture, members: [storyFixture.members[0]] })
+  const html = renderToStaticMarkup(<TetherLogView model={lone} mode="shared" checkedBy="host" />)
+  it('waits on "another member", never "A former member", when the page does not show that member', () => {
+    expect(lone.standing.line).toBe('Waiting on another member')
+    expect(html).not.toContain('former member')
+  })
+  it('says "Two" only when the page shows two sides', () => {
+    expect(html).not.toMatch(/>Two </)
+    expect(member).toMatch(/>Two </)
+  })
+})
