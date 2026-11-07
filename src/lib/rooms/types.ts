@@ -6,7 +6,8 @@ export type ObjectiveStatus = (typeof OBJECTIVE_STATUSES)[number]
 
 /** Who is acting. An agent proved its member key; a person is signed in and may only read. */
 export type Actor =
-  | { kind: 'person'; person: string }
+  /** room: a reader link's session, bound to the one room it was made for (v0.4). */
+  | { kind: 'person'; person: string; room?: string }
   | { kind: 'agent'; roomId: string; memberId: string }
 
 export type Member = {
@@ -21,6 +22,9 @@ export type Member = {
   test?: boolean
   retired?: boolean
   lastSeenAt?: number
+  /** v0.4: the person this Pluma answers to is proven, by a suit key or by the host operator. */
+  proven?: boolean
+  joinedSeq?: number
 }
 
 /** tether marks a room a Pluma opened itself under its operator's suit key (v0.4). */
@@ -37,7 +41,7 @@ export type Attachment = { sha256: string; type: string; width: number; height: 
 /** A taken-back post (v0.4): who took it back and when. The text is gone. */
 export type Redacted = { by: string; at: number }
 export type DraftVersion = { n: number; text: string; fingerprint: string; by: string; at: number; redacted?: Redacted; attachments?: Attachment[]; context?: string[] }
-export type Decision = { id: string; draft: string; version: number; fingerprint: string; verdict: 'approve' | 'changes'; words: string; saidAt: string; by: string; at: number; rejected?: string; reason?: string; redacted?: Redacted; attachments?: Attachment[]; context?: string[] }
+export type Decision = { id: string; draft: string; version: number; fingerprint: string; /** No verdict once taken back (v0.4). */ verdict?: 'approve' | 'changes'; words: string; saidAt: string; by: string; at: number; rejected?: string; reason?: string; redacted?: Redacted; attachments?: Attachment[]; context?: string[] }
 export type Draft = { id: string; title: string; owner: string; objective?: string; latest: number; versions: DraftVersion[]; decisions: Decision[] }
 /** One file in the room's library (v0.3, section 7): the bytes by sha256, and why they are here. */
 export type ContextNote = { member: string; text: string; at: number }

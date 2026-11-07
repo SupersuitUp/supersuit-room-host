@@ -6,7 +6,8 @@ export type Proof = { label: string; href?: string }
 
 export type TetherMember = { id: string; name: string; answersTo: string; answersToName?: string; retired?: boolean; lastSeenAt?: number }
 export type TetherObjective = { id: string; title: string; owner: string; done: string; status: string }
-export type TetherDecisionRef = { version: number; fingerprint: string }
+/** redacted: taken back, so it decides nothing. */
+export type TetherDecisionRef = { version: number; fingerprint: string; redacted?: unknown }
 export type TetherDraft = { id: string; title: string; owner: string; latest: number; versions: { n: number; fingerprint: string }[]; decisions: TetherDecisionRef[] }
 export type TetherEvent = { seq: number; type: string; by: string; at: number; [k: string]: unknown }
 export type TetherContextItem = { name: string; why: string; retired?: boolean }

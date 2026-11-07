@@ -8,5 +8,8 @@ export const dynamic = 'force-dynamic'
 
 // The rooms the signed-in person may read: those their own Pluma is in.
 export async function GET(req: Request) {
-  return handle(async () => json({ rooms: await rooms.roomsFor(await getCtx(), await requirePerson(req)) }))
+  return handle(async () => {
+    const who = await requirePerson(req)
+    return json({ rooms: await rooms.roomsFor(await getCtx(), who.person, who.room) })
+  })
 }

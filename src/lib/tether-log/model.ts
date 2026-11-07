@@ -30,7 +30,7 @@ export function tetherLog(input: TetherInput): TetherLogModel {
     const said = e.said as { words: string } | undefined
     switch (e.type) {
       case 'decision': return { ...base, kind: 'decision', words: e.words as string, saidBy: firstName(members.find((m) => m.answersTo === e.owner)), carriedBy: base.who, verdict: e.verdict as string, rejected: e.rejected as string | undefined, reason: e.reason as string | undefined }
-      case 'draft.version': return { ...base, kind: 'draft', text: `Posted version ${String(e.version)} of "${String(e.title)}".` }
+      case 'draft.version': return { ...base, kind: 'draft', text: e.title ? `Posted version ${String(e.version)} of "${String(e.title)}".` : `Posted version ${String(e.version)} of a draft.` }
       case 'objective.amended': return { ...base, kind: 'amended', text: `Changed the intent to "${String(e.title ?? e.done)}".`, reason: e.reason as string }
       case 'room.closed': return { ...base, kind: 'closed', text: 'Closed this log.' }
       default: return { ...base, kind: (said ? 'said' : 'step') satisfies EntryKind, text: e.text as string, words: said?.words, saidBy: said ? person : undefined, carriedBy: said ? base.who : undefined, proof: (e.proof as Proof[] | undefined) ?? [] }
@@ -61,7 +61,7 @@ export function tetherLog(input: TetherInput): TetherLogModel {
   const nextId = lastStep?.next as string | undefined
   const undecided = drafts.filter((d) => {
     const fp = d.versions.find((v) => v.n === d.latest)?.fingerprint
-    return !d.decisions.some((x) => x.version === d.latest && x.fingerprint === fp)
+    return !d.decisions.some((x) => !x.redacted && x.version === d.latest && x.fingerprint === fp)
   })
   const allDone = objectives.length > 0 && objectives.every((o) => o.status === 'done')
   const ownerName = (person: string) => firstName(members.find((m) => m.answersTo === person))
@@ -73,7 +73,7 @@ export function tetherLog(input: TetherInput): TetherLogModel {
 
   const open: Open[] = []
   if (standing.state === 'Waiting') open.push({ text: standing.line, ref: 'Next' })
-  for (const d of undecided) open.push({ text: `A decision on "${d.title}"`, ref: 'Draft' })
+  for (const d of undecided) open.push({ text: d.title ? `A decision on "${d.title}"` : 'A decision on a draft', ref: 'Draft' })
   for (const o of objectives) if (o.status !== 'done') open.push({ text: o.done, ref: 'Done means' })
 
   const live = entries.filter((e) => e.reversedBy === undefined)

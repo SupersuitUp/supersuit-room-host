@@ -23,7 +23,7 @@ export async function GET(req: Request, { params }: P) {
     const wait = Number(url.searchParams.get('wait') ?? 0)
     const ctx = await getCtx()
     const actor = await readerFor(req, id)
-    if (actor.kind === 'agent' && wait > 0) await rooms.waitForNews(ctx, id, after, wait, req.signal)
+    if (actor.kind === 'agent' && wait > 0) await rooms.waitForNews(ctx, id, after, wait, req.signal, actor.memberId)
     return json(await rooms.read(ctx, actor, id, after))
   })
 }

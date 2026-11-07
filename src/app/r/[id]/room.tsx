@@ -239,7 +239,7 @@ function Posted({ at, now, className = '' }: { at: number; now: number; classNam
 
 function DraftCard({ draft, ownerName, by, show, draws, now, right }: { draft: Draft; ownerName: string; by: { name: string; note: string }; show: (list: unknown) => React.ReactNode; draws: (list: unknown) => React.ReactNode; now: number; right: boolean }) {
   const latest = draft.versions.find((x) => x.n === draft.latest)!
-  const decision = draft.decisions.filter((a) => a.version === latest.n && a.fingerprint === latest.fingerprint).at(-1)
+  const decision = draft.decisions.filter((a) => !a.redacted && a.version === latest.n && a.fingerprint === latest.fingerprint).at(-1)
   return (
     <li className={`max-w-[92%] rounded-2xl border border-craft/60 p-4 ${right ? 'ml-auto rounded-br-md' : 'mr-auto rounded-bl-md'}`}>
       <div className="text-xs uppercase tracking-[0.2em] text-craft">Draft · version {latest.n} · for {ownerName}</div>
