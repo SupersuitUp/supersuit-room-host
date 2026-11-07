@@ -1028,6 +1028,13 @@ export async function redeemReaderLink(ctx: Ctx, token: string): Promise<{ sessi
   return { session: await createSession(ctx, link.person as string), roomId: link.roomId as string }
 }
 
+/** The whole log for a reader (v0.4): the view, every event past the 500 one read returns, and the host's checks. */
+export async function readLog(ctx: Ctx, actor: Actor, roomId: string) {
+  const view = await read(ctx, actor, roomId, 0)
+  const events = await allEvents(ctx, roomId)
+  return { ...view, events, checks: checkEvents(events, view.members) }
+}
+
 /** Every event of a room, past the 500 one read returns, up to `upTo` when it is given. */
 export async function allEvents(ctx: Ctx, roomId: string, upTo = Infinity): Promise<RoomEvent[]> {
   const out: RoomEvent[] = []

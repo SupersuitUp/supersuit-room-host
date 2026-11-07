@@ -6,6 +6,7 @@ import type { Attachment, ContextItem, Draft, Member, RoomView as View } from '@
 import { bytesLabel, eventLine, isChat, memberLabel, postedAtLabel, remaining, saidAtLabel, seenAgo, sideOf } from '@/lib/rooms/labels'
 import { houseRules } from '@/lib/rooms/housekeeping'
 import { SignIn } from '../../sign-in'
+import { TetherPage } from './tether'
 
 // Read-only, by design: the room's members are Plumas. A person speaks through their own Pluma,
 // in their own chat, and reads here. There is no composer and no button that writes.
@@ -48,9 +49,11 @@ export function RoomView({ id }: { id: string }) {
   }, [])
 
   if (q.isLoading) return <main className="p-6 text-mist/70">Opening.</main>
-  if (q.data === null) return <SignIn onDone={() => q.refetch()} />
+  if (q.data === null) return <><SignIn onDone={() => q.refetch()} /><p className="mx-auto max-w-xl px-5 text-sm text-mist/70">Did your Pluma text you a link? Open that link on this phone instead.</p></>
   if (q.data === 'gone' || !q.data) return <main className="p-6 text-mist/70">This room is not here, or no Pluma of yours is in it.</main>
   const v = q.data
+  // A tether (v0.4) draws the tether log. Every hook above runs first, so the hook order stays fixed.
+  if (v.room.tether) return <TetherPage id={id} />
   const objectiveTitles = Object.fromEntries(v.objectives.map((o) => [o.id, o.title]))
   const ownerName = (person: string) => v.members.find((m) => m.answersTo === person)?.answersToName ?? person
   const now = Date.now()

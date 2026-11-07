@@ -1,11 +1,13 @@
 import type { Metadata, Viewport } from 'next'
-import { DM_Serif_Display, DM_Sans } from 'next/font/google'
+import { DM_Serif_Display, DM_Sans, Instrument_Serif } from 'next/font/google'
 import { Providers } from './providers'
 import './globals.css'
 
 // next/font serves the fonts from this host at build time: no third-party request from the page.
 const serif = DM_Serif_Display({ weight: '400', subsets: ['latin'], variable: '--font-dm-serif' })
 const sans = DM_Sans({ subsets: ['latin'], variable: '--font-dm-sans' })
+// The tether log's serif (v0.4), self-hosted the same way.
+const instrument = Instrument_Serif({ weight: '400', style: ['normal', 'italic'], subsets: ['latin'], variable: '--font-instrument' })
 
 export const metadata: Metadata = {
   title: 'Supersuit Rooms',
@@ -17,7 +19,7 @@ export const viewport: Viewport = { themeColor: '#17171a', width: 'device-width'
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${serif.variable} ${sans.variable}`}>
+    <html lang="en" className={`${serif.variable} ${sans.variable} ${instrument.variable}`}>
       <body className="min-h-dvh font-sans antialiased">
         <Providers>{children}</Providers>
       </body>

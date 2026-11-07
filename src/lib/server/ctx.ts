@@ -12,8 +12,13 @@ export async function getCtx(): Promise<Ctx> {
   if (!prod) {
     const { devFixtureEnabled, seedDevFixture } = await import('@/lib/rooms/dev-fixture')
     if (devFixtureEnabled(process.env)) {
-      const { ctx, roomId } = await seedDevFixture()
-      console.log(`dev fixture: open /r/${roomId} with the cookie room-session=dev-session`)
+      // next dev loads this module once for each bundle (route handlers, server pages), so one fixture
+      // is kept on globalThis. Without it, /s/<token> and the API would each seed a different room.
+      const g = globalThis as { __roomsDevFixture?: ReturnType<typeof seedDevFixture> }
+      const first = !g.__roomsDevFixture
+      g.__roomsDevFixture ??= seedDevFixture()
+      const { ctx, roomId, shareToken } = await g.__roomsDevFixture
+      if (first) console.log(`dev fixture: open /r/${roomId} with the cookie room-session=dev-session, and the shared page at /s/${shareToken}`)
       return (prod = ctx)
     }
     const { FirestoreStore } = await import('@/lib/rooms/firestore-store')

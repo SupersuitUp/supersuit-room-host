@@ -29,4 +29,13 @@ describe('the development fixture', () => {
     const live = v.context.find((c) => !c.retired && c.contentType.startsWith('image/'))!
     expect((await rooms.fetchContext(ctx, { kind: 'person', person: 'ada' }, roomId, live.sha256)).downloadUrl).toMatch(/^data:image\/png;base64,/)
   })
+
+  it('seeds a tether with steps, and a live read-only page for its shared view', async () => {
+    const { ctx, roomId, shareToken } = await seedDevFixture()
+    const v = await rooms.read(ctx, { kind: 'person', person: 'ada' }, roomId, 0)
+    expect(v.room.tether).toBe(true)
+    expect(v.events.filter((e) => e.type === 'step').length).toBeGreaterThan(2)
+    const s = await rooms.readShare(ctx, shareToken)
+    expect(s?.room.id).toBe(roomId)
+  })
 })
