@@ -14,6 +14,7 @@
 // size, type and crc32c, lists the item only once the store holds exactly those bytes, and hands
 // readers 15-minute signed addresses. It enforces no limit, and declares the retention it keeps.
 import { createHash, randomBytes } from 'node:crypto'
+import { checkHandle, verifySig } from '@supersuit/suit-identity'
 import { Refusal } from './refusal'
 import type { Data, Doc, Store, Tx } from './store'
 import { canonical, fingerprint as keyFingerprint, isPublicKey, safetyPhrase, verifySigned } from './signing'
@@ -31,12 +32,20 @@ import {
  * objects is the object store for context bytes (v0.3); a host without one refuses context requests.
  * sleep is the long poll's wait (v0.4), replaced in tests.
  */
-export type Ctx = { store: Store; now: () => number; objects?: ObjectStore; sleep?: (ms: number) => Promise<void>; directory?: unknown }
+export type Ctx = { store: Store; now: () => number; objects?: ObjectStore; sleep?: (ms: number) => Promise<void>; directory?: Directory }
+
+/** A suit's verified keys, from the public directory (v0.4); null when no suit holds the handle. */
+export type Directory = (handle: string) => Promise<{ suit: string; keys: string[] } | null>
+const directoryOf = (ctx: Ctx): Directory => {
+  if (!ctx.directory) throw new Error('this host has no suit directory configured')
+  return ctx.directory
+}
 export type { ContextItem }
 /** Who may invite: the host operator (scripts/admin.ts) or a member Pluma. Never a person directly. */
 export type Inviter = 'operator' | Actor
 
-const INVITE_MS = 24 * 3_600_000
+/** The longest an invite lasts (v0.4): 14 days, for an invite sent through S2S. The default is 24 hours. */
+export const MAX_INVITE_HOURS = 336
 const CLOCK_MS = 5 * 60_000
 const MAX_TEXT = 20_000
 const NONCE = /^[A-Za-z0-9_-]{16,64}$/
@@ -149,8 +158,12 @@ async function activeMemberCount(ctx: Ctx, roomId: string) {
   return (await ctx.store.list(`rooms/${roomId}/members`)).filter((m) => isAgentMember(m.data) && !m.data.retired).length
 }
 
-/** A one-time, 24-hour door for one named member. The code is shown once; only its digest is kept. */
-export async function createInvite(ctx: Ctx, by: Inviter, roomId: string, p: { name: string; answersTo: string; test?: boolean }): Promise<{ code: string }> {
+/**
+ * A one-time door for one named member, open 24 hours unless it asks for up to 336 (v0.4). The code is
+ * shown once; only its digest is kept.
+ */
+export async function createInvite(ctx: Ctx, by: Inviter, roomId: string, p: { name: string; answersTo: string; test?: boolean; ttlHours?: number }): Promise<{ code: string }> {
+  const ttl = Math.min(Math.max(Number(p.ttlHours) || 24, 1), MAX_INVITE_HOURS) * 3_600_000
   const code = randomBytes(16).toString('hex') // hex: a base64url code can start with '-', which a CLI reads as a flag
   await ctx.store.transaction(async (tx) => {
     let room: Data | null
@@ -167,7 +180,7 @@ export async function createInvite(ctx: Ctx, by: Inviter, roomId: string, p: { n
     await personName(tx, p.answersTo)
     tx.set(`invites/${sha256(code)}`, {
       roomId, name: text(p.name, 'member name', 80), answersTo: p.answersTo, test: p.test === true,
-      createdBy: inviter, expiresAt: ctx.now() + INVITE_MS, redeemedAt: null,
+      createdBy: inviter, expiresAt: ctx.now() + ttl, redeemedAt: null,
     })
     if (inviter !== 'host') emit(tx, roomId, room, ctx.now(), { type: 'member.invited', by: inviter, name: p.name, answersTo: p.answersTo })
   })
@@ -603,8 +616,26 @@ export async function submitPost(ctx: Ctx, roomId: string, post: Record<string, 
   const type = String(post.type ?? '')
 
   if (type === 'invite') {
-    const { code } = await createInvite(ctx, { kind: 'agent', roomId, memberId }, roomId, { name: String(post.name ?? ''), answersTo: String(post.answersTo ?? '') })
+    // v0.4: an invite may name a suit handle, which becomes the person when the directory lists it.
+    const handle = optString(post.handle)
+    if (handle) {
+      if (!checkHandle(handle).ok || !(await directoryOf(ctx)(handle))) throw new Refusal('no suit holds that handle', 400)
+      await ensureHandlePerson(ctx, handle, text(post.personName, "the person's name", 80))
+    }
+    const { code } = await createInvite(ctx, { kind: 'agent', roomId, memberId }, roomId, { name: String(post.name ?? ''), answersTo: handle ?? String(post.answersTo ?? ''), ttlHours: Number(post.ttlHours) || undefined })
     return { code }
+  }
+  if (type === 'reader.link') {
+    // v0.4: a one-time link that gives the member's own person a session, with no email on this host.
+    const token = randomBytes(32).toString('base64url')
+    await ctx.store.transaction(async (tx) => {
+      const { member } = await memberOf(tx, { kind: 'agent', roomId, memberId }, roomId)
+      const nonceRef = `rooms/${roomId}/nonces/${memberId}~${post.nonce}`
+      if (await tx.get(nonceRef)) throw new Refusal('this post was already received', 409)
+      tx.set(nonceRef, { at: ctx.now() })
+      tx.set(`readerLinks/${sha256(token)}`, { person: member.answersTo, roomId, expiresAt: ctx.now() + READER_LINK_MS, usedAt: null })
+    })
+    return { path: `/open/${token}` }
   }
   const handler = HANDLERS[type]
   if (!handler) throw new Refusal(`unknown post type: ${type}`, 400)
@@ -890,6 +921,78 @@ export async function closeRoom(ctx: Ctx, roomId: string) {
     tx.update(`rooms/${roomId}`, { state: 'closed', closedAt: now })
     emit(tx, roomId, room, now, { type: 'room.closed', by: 'host' })
   })
+}
+
+// ---- tethers (v0.4): a room a Pluma opens under its operator's suit key ----
+
+const READER_LINK_MS = 7 * 86_400_000
+
+async function ensureHandlePerson(ctx: Ctx, handle: string, name: string) {
+  await ctx.store.transaction(async (tx) => {
+    if (!(await tx.get(`people/${handle}`))) tx.set(`people/${handle}`, { name, emailDigests: [], handle })
+  })
+}
+
+/**
+ * Open a tether. The body is an entry signed with the operator's suit key, checked against the key log in
+ * the public directory, so the host learns who is asking without storing a secret or an email. It carries
+ * the public half of a member key made on the operator's own computer, so the room and its first member
+ * land together.
+ */
+export async function startTether(ctx: Ctx, entry: Record<string, unknown>) {
+  const { sig, ...p } = entry
+  if (p.op !== 'tether-start') throw new Refusal('not a tether-start', 400)
+  checkClock(ctx, p.at)
+  if (typeof p.nonce !== 'string' || !NONCE.test(p.nonce)) throw new Refusal('nonce is 16 to 64 base64url characters', 400)
+  if (!isPublicKey(p.publicKey)) throw new Refusal('publicKey is not an Ed25519 public key (base64url, 32 bytes)', 400)
+  const handle = String(p.handle ?? '')
+  const signedBy = checkHandle(handle).ok ? await directoryOf(ctx)(handle) : null
+  if (!signedBy || !signedBy.keys.some((k) => verifySig(p, sig, k))) throw new Refusal('that is not a key of this suit', 401)
+  const personName = text(p.personName, "the person's name", 80)
+  const memberName = text(p.memberName, 'member name', 80)
+  const name = text(p.name, 'tether name', 120)
+  const roomId = newId('r')
+  const memberId = newId('a-')
+  const fp = keyFingerprint(p.publicKey)
+  const phrase = safetyPhrase(fp)
+  const now = ctx.now()
+  await ctx.store.transaction(async (tx) => {
+    const nonceRef = `tetherNonces/${handle}~${p.nonce}`
+    if (await tx.get(nonceRef)) throw new Refusal('this start was already received', 409)
+    const person = await tx.get(`people/${handle}`)
+    if (!person) tx.set(`people/${handle}`, { name: personName, emailDigests: [], handle })
+    tx.set(nonceRef, { at: now })
+    tx.set(`rooms/${roomId}`, { name, state: 'open', tether: true, createdBy: handle, createdAt: now, seq: 2 })
+    tx.set(`rooms/${roomId}/events/${pad(1)}`, { seq: 1, type: 'room.created', by: 'host', at: now, name })
+    tx.set(`rooms/${roomId}/events/${pad(2)}`, { seq: 2, type: 'member.joined', by: memberId, member: memberId, name: memberName, phrase, at: now })
+    tx.set(`memberKeys/${memberId}`, { roomId, publicKey: p.publicKey })
+    tx.set(`rooms/${roomId}/members/${memberId}`, { kind: 'agent', name: memberName, answersTo: handle, answersToName: (person?.name as string) ?? personName, publicKey: p.publicKey, fingerprint: fp, phrase, lastSeenAt: now, joinedSeq: 2 })
+  })
+  return { roomId, memberId, name: memberName, fingerprint: fp, phrase, person: handle }
+}
+
+/** Spend a one-time reader link: a 30-day session for the person it was made for. Used, expired or unknown: null. */
+export async function redeemReaderLink(ctx: Ctx, token: string): Promise<{ session: string; roomId: string } | null> {
+  const ref = `readerLinks/${sha256(token)}`
+  const link = await ctx.store.transaction(async (tx) => {
+    const l = await tx.get(ref)
+    if (!l || l.usedAt || (l.expiresAt as number) < ctx.now()) return null
+    tx.update(ref, { usedAt: ctx.now() })
+    return l
+  })
+  if (!link) return null
+  return { session: await createSession(ctx, link.person as string), roomId: link.roomId as string }
+}
+
+/** Every event of a room, past the 500 one read returns, up to `upTo` when it is given. */
+export async function allEvents(ctx: Ctx, roomId: string, upTo = Infinity): Promise<RoomEvent[]> {
+  const out: RoomEvent[] = []
+  for (let after = 0; ;) {
+    const page = await ctx.store.list(`rooms/${roomId}/events`, { after: { field: 'seq', value: after }, orderBy: 'seq', limit: 500 })
+    for (const d of page) if ((d.data.seq as number) <= upTo) out.push(d.data as unknown as RoomEvent)
+    if (page.length < 500 || (page.at(-1)!.data.seq as number) >= upTo) return out
+    after = page.at(-1)!.data.seq as number
+  }
 }
 
 /** Every context byte under one room, deleted (delete-room, and a closed room's purge). */

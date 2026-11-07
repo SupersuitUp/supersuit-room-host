@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@supersuit/suit-identity':
+        specifier: 0.1.0
+        version: 0.1.0
       '@tanstack/react-query':
         specifier: ^5.90.0
         version: 5.104.1(react@19.3.0)
@@ -1022,6 +1025,11 @@ packages:
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+
+  '@supersuit/suit-identity@0.1.0':
+    resolution: {integrity: sha512-+3knk5WLEW9wP4b1g8gIjdSnRyFyCUOiryqRC29wL8X9yGsDCRUrs1BgMFSE97Obsaqe+ujofZqSFsArB/jWBw==}
+    engines: {node: '>=20'}
+    hasBin: true
 
   '@swc/helpers@0.5.23':
     resolution: {integrity: sha512-5lSsMOTXURePglDfvuAQUqkGek9Hg2kksOYay2m0+XR++b2NWYL/4sWyuvVBIs8oKnJaxkdi9whaL/sqN13afw==}
@@ -3258,6 +3266,8 @@ snapshots:
   '@rolldown/pluginutils@1.0.1': {}
 
   '@standard-schema/spec@1.1.0': {}
+
+  '@supersuit/suit-identity@0.1.0': {}
 
   '@swc/helpers@0.5.23':
     dependencies:

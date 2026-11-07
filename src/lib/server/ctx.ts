@@ -6,7 +6,7 @@ export const SESSION_COOKIE = 'room-session'
 let override: Ctx | null = null
 let prod: Ctx | null = null
 
-/** The store, object store and clock every route uses: Firestore and Cloud Storage in production, memory in tests. */
+/** The store, object store, suit directory and clock every route uses: Firestore and Cloud Storage in production, memory in tests. */
 export async function getCtx(): Promise<Ctx> {
   if (override) return override
   if (!prod) {
@@ -19,8 +19,9 @@ export async function getCtx(): Promise<Ctx> {
     const { FirestoreStore } = await import('@/lib/rooms/firestore-store')
     const { GcsObjectStore } = await import('@/lib/rooms/gcs-object-store')
     const { getAdminDb, getContextBucket } = await import('./firebase-admin')
+    const { suitDirectory } = await import('./directory')
     const bucket = getContextBucket()
-    prod = { store: new FirestoreStore(getAdminDb()), now: () => Date.now(), objects: bucket ? new GcsObjectStore(bucket) : undefined }
+    prod = { store: new FirestoreStore(getAdminDb()), now: () => Date.now(), objects: bucket ? new GcsObjectStore(bucket) : undefined, directory: suitDirectory }
   }
   return prod
 }

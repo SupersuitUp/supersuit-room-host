@@ -12,6 +12,7 @@
     "living:check": "vitest run && tsc --noEmit && pnpm run build && node living/private-words.mjs"
   },
   "dependencies": {
+    "@supersuit/suit-identity": "0.1.0",
     "@tanstack/react-query": "^5.90.0",
     "firebase": "^12.10.0",
     "firebase-admin": "^13.7.0",

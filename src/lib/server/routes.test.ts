@@ -10,6 +10,9 @@ import { GET as eventsGET } from '@/app/api/rooms/[id]/events/route'
 import { POST as joinPOST } from '@/app/api/agent/join/route'
 import { POST as sessionPOST } from '@/app/api/session/route'
 import { GET as roomsGET } from '@/app/api/rooms/route'
+import { POST as tethersPOST } from '@/app/api/tethers/route'
+import { POST as openPOST } from '@/app/api/open/route'
+import { newDeviceKey, signEntry } from '@supersuit/suit-identity'
 
 let ctx: rooms.Ctx
 let roomId: string
@@ -147,5 +150,34 @@ describe('the long poll', () => {
     expect(res.status).toBe(200)
     expect(calls).toBe(2)
     expect((await res.json()).events.map((e: { text?: string }) => e.text)).toEqual(['news'])
+  })
+})
+
+describe('tethers (v0.4)', () => {
+  it('a Pluma opens a tether under its suit key, and a bad signature is 401', async () => {
+    const suit = newDeviceKey()
+    ctx.directory = async (h) => (h === 'ada-lovelace' ? { suit: 's1', keys: [suit.pub] } : null)
+    const k = generateKeyPairSync('ed25519')
+    const entry = signEntry({ op: 'tether-start', handle: 'ada-lovelace', personName: 'Ada', memberName: "Ada's Pluma", name: 'T', publicKey: publicKeyB64(k.publicKey), at: iso(), nonce: nonce() }, suit.priv)
+    const ok = await tethersPOST(new Request(H + '/api/tethers', { method: 'POST', body: JSON.stringify(entry) }))
+    expect(ok.status).toBe(200)
+    expect((await ok.json()).person).toBe('ada-lovelace')
+    const bad = await tethersPOST(new Request(H + '/api/tethers', { method: 'POST', body: JSON.stringify({ ...entry, nonce: nonce() }) }))
+    expect(bad.status).toBe(401)
+  })
+
+  it('a reader link opens once on POST, sets the session cookie, and then answers 404', async () => {
+    const post = { v: 1, type: 'reader.link', room: roomId, member: ada.memberId, at: iso(), nonce: nonce() }
+    const r = await postsPOST(new Request(`${H}/api/rooms/${roomId}/posts`, { method: 'POST', body: JSON.stringify({ post, sig: ada.s(post) }) }), params({ id: roomId }))
+    const token = ((await r.json()).path as string).replace('/open/', '')
+    const open = () => openPOST(new Request(H + '/api/open', { method: 'POST', body: JSON.stringify({ token }) }))
+    const first = await open()
+    expect(first.status).toBe(200)
+    expect((await first.json()).room).toBe(roomId)
+    const cookie = first.headers.get('set-cookie') ?? ''
+    expect(cookie).toMatch(/HttpOnly/i)
+    const session = cookie.split(';')[0].split('=')[1]
+    expect(await rooms.personForSession(ctx, session)).toBe('ada')
+    expect((await open()).status).toBe(404)
   })
 })
