@@ -31,7 +31,8 @@ async function start(handle = 'ada-lovelace', suit = suitA, over: Record<string,
 async function joinHandle(by: P, handle: string, suit: typeof suitA | null, personName = 'Ben'): Promise<P> {
   const { code } = await post(ctx, by, 'invite', { name: `${personName}'s Pluma`, handle, personName }) as { code: string }
   const k = pluma()
-  const bare = { v: 1, type: 'join', code, publicKey: k.pub, at: iso(), nonce: nonce() }
+  // The name rides in the join the suit signs (second review, finding 2).
+  const bare = { v: 1, type: 'join', code, publicKey: k.pub, at: iso(), nonce: nonce(), personName }
   const req = suit ? { ...bare, suitSig: signEntry(bare, suit.priv).sig } : bare
   const r = await rooms.redeemInvite(ctx, req, k.s(req))
   return { ...k, memberId: r.memberId, roomId: by.roomId }
@@ -56,7 +57,10 @@ describe('1. a person is proven before a reader link', () => {
   it('a member cannot invite a Pluma that answers to someone else and sign in as them', async () => {
     await rooms.addPerson(ctx, { key: 'ben', name: 'Ben', emails: ['ben@example.com'] })
     const ada = await start()
-    const { code } = await post(ctx, ada, 'invite', { name: 'Fake', answersTo: 'ben' }) as { code: string }
+    // Since the second review the invite itself is refused: a member invites only for its own person.
+    await refused(post(ctx, ada, 'invite', { name: 'Fake', answersTo: 'ben' }), 403)
+    // A member that is not proven (here the operator's test stand-in) still gets no reader link.
+    const { code } = await rooms.createInvite(ctx, 'operator', ada.roomId, { name: 'Stand-in', answersTo: 'ben', test: true })
     const k = pluma()
     const req = { v: 1, type: 'join', code, publicKey: k.pub, at: iso(), nonce: nonce() }
     const r = await rooms.redeemInvite(ctx, req, k.s(req))
@@ -105,7 +109,8 @@ describe('3. a share needs real yeses', () => {
   it('a yes from an unproven member does not count', async () => {
     await rooms.addPerson(ctx, { key: 'ben', name: 'Ben', emails: [] })
     const ada = await start()
-    const { code } = await post(ctx, ada, 'invite', { name: 'Not Ben', answersTo: 'ben' }) as { code: string }
+    await join(ctx, ada.roomId, "Ben's Pluma", 'ben')
+    const { code } = await rooms.createInvite(ctx, 'operator', ada.roomId, { name: 'Not Ben', answersTo: 'ben', test: true })
     const k = pluma()
     const req = { v: 1, type: 'join', code, publicKey: k.pub, at: iso(), nonce: nonce() }
     const fake = { ...k, memberId: (await rooms.redeemInvite(ctx, req, k.s(req))).memberId, roomId: ada.roomId }

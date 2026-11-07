@@ -178,6 +178,7 @@ export async function createInvite(ctx: Ctx, by: Inviter, roomId: string, p: { n
   await ctx.store.transaction(async (tx) => {
     let room: Data | null
     let inviter = 'host'
+    let inviterProven = false
     if (by === 'operator') {
       room = await tx.get(`rooms/${roomId}`)
       if (!room) throw NOT_FOUND()
@@ -185,19 +186,23 @@ export async function createInvite(ctx: Ctx, by: Inviter, roomId: string, p: { n
       const m = await memberOf(tx, by, roomId)
       room = m.room
       inviter = m.member.id
+      // A member invites a Pluma only for its own person; the host operator may name anyone (second review, finding 1).
+      if (!p.handle && p.answersTo !== m.member.answersTo) throw new Refusal('a Pluma invites another Pluma only for its own person', 403)
+      inviterProven = m.member.proven === true
     }
     requireOpen(room)
     if (!p.handle) await personName(tx, p.answersTo)
     // A replayed invite post mints nothing (review finding 6): its nonce is kept in this transaction.
     if (p.nonceRef && (await tx.get(p.nonceRef))) throw new Refusal('this post was already received', 409)
     if (p.nonceRef) tx.set(p.nonceRef, { at: ctx.now() })
-    // proven: the host operator named the person, or the joiner must sign with the person's suit key.
+    // proven: the host operator named the person, a proven member asked for a second Pluma of its own
+    // person, or the joiner must sign with the person's suit key (a handle invite).
     const invite: Data = {
       roomId, name: text(p.name, 'member name', 80), answersTo: p.answersTo, test: p.test === true,
-      createdBy: inviter, expiresAt: ctx.now() + ttl, redeemedAt: null, proven: (by === 'operator' && p.test !== true) || !!p.handle,
+      createdBy: inviter, expiresAt: ctx.now() + ttl, redeemedAt: null, proven: (by === 'operator' && p.test !== true) || inviterProven || !!p.handle,
     }
-    // A handle invite carries the person's name for the join; only a join that proves the suit uses it (finding 7).
-    if (p.handle) { invite.handle = p.handle; invite.personName = p.personName ?? '' }
+    // A handle invite names no one: the person's name comes from their own suit-signed join (second review, finding 2).
+    if (p.handle) invite.handle = p.handle
     tx.set(`invites/${sha256(code)}`, invite)
     if (inviter !== 'host') emit(tx, roomId, room, ctx.now(), { type: 'member.invited', by: inviter, name: p.name, answersTo: p.answersTo })
   })
@@ -243,7 +248,8 @@ export async function redeemInvite(ctx: Ctx, req: Record<string, unknown>, sig: 
     requireOpen(room)
     if (invite.handle && invite.handle !== pre?.handle) throw NOT_FOUND()
     const person = invite.handle ? await tx.get(`people/${invite.answersTo}`) : null
-    const answersToName = invite.handle ? ((person?.name as string | undefined) ?? text(invite.personName, "the person's name", 80)) : await personName(tx, invite.answersTo as string)
+    const joinName = req.personName === undefined ? (invite.handle as string) : text(req.personName, "the person's name", 80)
+    const answersToName = invite.handle ? ((person?.name as string | undefined) ?? joinName) : await personName(tx, invite.answersTo as string)
     const now = ctx.now()
     if (invite.handle && !person) tx.set(`people/${invite.answersTo}`, { name: answersToName, emailDigests: [], handle: invite.handle })
     tx.update(inviteRef, { redeemedAt: now })
@@ -364,16 +370,21 @@ const POLL_MS = 1_500
  */
 /** Long polls one member may hold at once on one instance (review finding 9). A wait past this answers at once. */
 export const MAX_WAITS_PER_MEMBER = 2
+/** Long polls one person (one suit, for a tether) may hold at once across all their rooms (second review, finding 4). */
+export const MAX_WAITS_PER_PERSON = 4
+/** Seconds a capped long poll asks the client to wait before it asks again. */
+export const WAIT_RETRY_SECONDS = 5
 const waiting = new Map<string, number>()
+const hold = (key: string, d: number) => { const n = (waiting.get(key) ?? 0) + d; if (n > 0) waiting.set(key, n); else waiting.delete(key) }
 
-export async function waitForNews(ctx: Ctx, roomId: string, after: number, waitSeconds: number, signal?: AbortSignal, memberId = ''): Promise<void> {
-  const key = `${roomId}~${memberId}`
-  if ((waiting.get(key) ?? 0) >= MAX_WAITS_PER_MEMBER) return
-  waiting.set(key, (waiting.get(key) ?? 0) + 1)
-  try { await waitLoop(ctx, roomId, after, waitSeconds, signal) } finally {
-    const n = (waiting.get(key) ?? 1) - 1
-    if (n > 0) waiting.set(key, n); else waiting.delete(key)
-  }
+export async function waitForNews(ctx: Ctx, roomId: string, after: number, waitSeconds: number, signal?: AbortSignal, memberId = ''): Promise<{ capped: true; retryAfter: number } | undefined> {
+  const m = memberId ? await ctx.store.get(`rooms/${roomId}/members/${memberId}`) : null
+  const keys = [`m:${roomId}~${memberId}`, `p:${String(m?.answersTo ?? `${roomId}~${memberId}`)}`]
+  const caps = [MAX_WAITS_PER_MEMBER, MAX_WAITS_PER_PERSON]
+  if (keys.some((k, i) => (waiting.get(k) ?? 0) >= caps[i])) return { capped: true, retryAfter: WAIT_RETRY_SECONDS }
+  keys.forEach((k) => hold(k, 1))
+  try { await waitLoop(ctx, roomId, after, waitSeconds, signal) } finally { keys.forEach((k) => hold(k, -1)) }
+  return undefined
 }
 
 async function waitLoop(ctx: Ctx, roomId: string, after: number, waitSeconds: number, signal?: AbortSignal): Promise<void> {
@@ -466,6 +477,11 @@ async function releaseAttachments(ctx: Ctx, roomId: string, shas: string[]) {
   }
 }
 
+/** Words and choices that speak for a person need a Pluma whose person is proven (second review, finding 1). */
+function requireProven(member: Member, what: string) {
+  if (!member.proven) throw new Refusal(`${what} needs a Pluma whose person is proven by a suit key or the host operator`, 403)
+}
+
 const HANDLERS: Record<string, Handler> = {
   async message(tx, { roomId, room, member, post, sig, now, attachments, context }) {
     const body = attachments && (post.text === undefined || post.text === '') ? '' : text(post.text, 'message')
@@ -477,6 +493,7 @@ const HANDLERS: Record<string, Handler> = {
   },
 
   async objective(tx, { roomId, room, member, post, sig, now }) {
+    requireProven(member, 'an objective')
     if (post.owner !== humanOf(member)) throw new Refusal('a Pluma sets objectives only for its own human', 403)
     const id = newId('o')
     const o = { title: text(post.title, 'title', 200), owner: post.owner, done: text(post.done, 'definition of done', 2000), status: 'open', createdAt: now, updatedAt: now }
@@ -498,6 +515,7 @@ const HANDLERS: Record<string, Handler> = {
 
   /** The intent changes forward: the old wording and the reason stay on the record. Only the owner's own Pluma. */
   async 'objective.amend'(tx, { roomId, room, member, post, sig, now }) {
+    requireProven(member, 'a change to an objective')
     const oid = String(post.objective ?? '')
     const ref = `rooms/${roomId}/objectives/${oid}`
     const o = await tx.get(ref)
@@ -517,6 +535,7 @@ const HANDLERS: Record<string, Handler> = {
   /** What a Pluma did, its proof, and whose move is next. A person's words ride in `said`, carried by their own Pluma. */
   async step(tx, { roomId, room, member, post, sig, now, attachments, context }) {
     const body = text(post.text, 'step')
+    if (post.said !== undefined) requireProven(member, "a person's words")
     if (post.next !== undefined && !isAgentMember(await tx.get(`rooms/${roomId}/members/${post.next}`))) throw new Refusal('that member is not in this room', 400)
     if (post.objective !== undefined && !(await tx.get(`rooms/${roomId}/objectives/${post.objective}`))) throw new Refusal('no such objective', 400)
     const reverses = await reversesOf(tx, roomId, post.reverses)
@@ -528,6 +547,7 @@ const HANDLERS: Record<string, Handler> = {
   },
 
   async draft(tx, { roomId, room, member, post, sig, now, attachments, context }) {
+    requireProven(member, 'a draft')
     if (post.objective !== undefined && !(await tx.get(`rooms/${roomId}/objectives/${post.objective}`))) throw new Refusal('no such objective', 400)
     const id = newId('d')
     const body = text(post.text, 'draft')
@@ -541,6 +561,7 @@ const HANDLERS: Record<string, Handler> = {
   },
 
   async 'draft.version'(tx, { roomId, room, member, post, sig, now, attachments, context }) {
+    requireProven(member, 'a draft')
     const did = String(post.draft ?? '')
     const d = await tx.get(`rooms/${roomId}/drafts/${did}`)
     if (!d) throw new Refusal('no such draft', 404)
@@ -560,6 +581,7 @@ const HANDLERS: Record<string, Handler> = {
    * exact version and fingerprint they were shown.
    */
   async decision(tx, { roomId, room, member, post, sig, now, attachments, context }) {
+    requireProven(member, 'a decision')
     const did = String(post.draft ?? '')
     const d = await tx.get(`rooms/${roomId}/drafts/${did}`)
     if (!d) throw new Refusal('no such draft', 404)
@@ -728,7 +750,7 @@ export async function submitPost(ctx: Ctx, roomId: string, post: Record<string, 
     if (handle && (!checkHandle(handle).ok || !(await directoryOf(ctx)(handle)))) throw new Refusal('no suit holds that handle', 400)
     const { code } = await createInvite(ctx, { kind: 'agent', roomId, memberId }, roomId, {
       name: String(post.name ?? ''), answersTo: handle ? handlePerson(handle) : String(post.answersTo ?? ''), ttlHours: Number(post.ttlHours) || undefined,
-      handle, personName: handle ? text(post.personName, "the person's name", 80) : undefined, nonceRef: `rooms/${roomId}/nonces/${memberId}~${post.nonce}`,
+      handle, nonceRef: `rooms/${roomId}/nonces/${memberId}~${post.nonce}`,
     })
     return { code }
   }
@@ -769,9 +791,10 @@ export async function submitPost(ctx: Ctx, roomId: string, post: Record<string, 
 /** True when the draft's latest version carries an approve decision, on its fingerprint, by the owner's own Pluma. */
 export function isApproved(d: Draft, members?: Member[]): boolean {
   const latest = d.versions.find((v) => v.n === d.latest)
-  if (!latest) return false
+  // A taken-back version approves nothing, and only a proven member's decision counts (second review, findings 1 and 3).
+  if (!latest || latest.redacted) return false
   return d.decisions.some((x) => !x.redacted && x.verdict === 'approve' && x.version === d.latest && x.fingerprint === latest.fingerprint
-    && (!members || members.find((m) => m.id === x.by)?.answersTo === d.owner))
+    && (!members || members.some((m) => m.id === x.by && m.answersTo === d.owner && m.proven === true)))
 }
 
 // ---- human sessions (no signing secret: a random token whose digest is the record) ----
@@ -1044,6 +1067,7 @@ export async function closeRoom(ctx: Ctx, roomId: string) {
 // ---- tethers (v0.4): a room a Pluma opens under its operator's suit key ----
 
 const READER_LINK_MS = 7 * 86_400_000
+export const MAX_STARTS_PER_HOUR = 20
 
 /**
  * Open a tether. The body is an entry signed with the operator's suit key, checked against the key log in
@@ -1075,13 +1099,20 @@ export async function startTether(ctx: Ctx, entry: Record<string, unknown>) {
     const nonceRef = `tetherNonces/${handle}~${p.nonce}`
     if (await tx.get(nonceRef)) throw new Refusal('this start was already received', 409)
     const person = await tx.get(`people/${key}`)
+    // One suit opens at most MAX_STARTS_PER_HOUR tethers an hour (second review, finding 4).
+    const rateRef = `tetherStarts/${handle}`
+    const recent = (((await tx.get(rateRef))?.times as number[] | undefined) ?? []).filter((t) => t > now - 3_600_000)
+    if (recent.length >= MAX_STARTS_PER_HOUR) throw new Refusal(`a suit opens at most ${MAX_STARTS_PER_HOUR} tethers an hour`, 429, Math.ceil((recent[0] + 3_600_000 - now) / 1000))
+    tx.set(rateRef, { times: [...recent, now] })
+    // The suit names its own person, and a later start may rename it (second review, finding 2).
     if (!person) tx.set(`people/${key}`, { name: personName, emailDigests: [], handle })
+    else if (person.name !== personName) tx.update(`people/${key}`, { name: personName })
     tx.set(nonceRef, { at: now })
     tx.set(`rooms/${roomId}`, { name, state: 'open', tether: true, createdBy: key, createdAt: now, seq: 2 })
     tx.set(`rooms/${roomId}/events/${pad(1)}`, { seq: 1, type: 'room.created', by: 'host', at: now, name })
     tx.set(`rooms/${roomId}/events/${pad(2)}`, { seq: 2, type: 'member.joined', by: memberId, member: memberId, name: memberName, phrase, at: now })
     tx.set(`memberKeys/${memberId}`, { roomId, publicKey: p.publicKey })
-    tx.set(`rooms/${roomId}/members/${memberId}`, { kind: 'agent', name: memberName, answersTo: key, answersToName: (person?.name as string) ?? personName, publicKey: p.publicKey, fingerprint: fp, phrase, lastSeenAt: now, joinedSeq: 2, proven: true })
+    tx.set(`rooms/${roomId}/members/${memberId}`, { kind: 'agent', name: memberName, answersTo: key, answersToName: personName, publicKey: p.publicKey, fingerprint: fp, phrase, lastSeenAt: now, joinedSeq: 2, proven: true })
   })
   return { roomId, memberId, name: memberName, fingerprint: fp, phrase, person: key, handle }
 }
@@ -1166,18 +1197,49 @@ export async function readShare(ctx: Ctx, token: string): Promise<SharedRoom | n
   const [members, events] = await Promise.all([ctx.store.list(`rooms/${roomId}/members`), allEvents(ctx, roomId, s.upTo as number)])
   // Everything below is the log as it stood at upTo, built from its events: later members, later
   // objectives and later wordings stay out (review finding 5).
+  // A share shows only what a proven, non-test member wrote for a person who said yes to it. A stand-in,
+  // or a retired member whose person was never asked, is left out (second review, finding 7).
+  const yes = new Set(s.yes as string[])
+  const speaks = new Set(members.filter((m) => isAgentMember(m.data) && m.data.proven === true && !m.data.test && yes.has(m.data.answersTo as string)).map((m) => m.id))
+  const kept = events.filter((e) => e.by === 'host' || speaks.has(e.by))
   const joined = new Set(events.filter((e) => e.type === 'member.joined').map((e) => e.member as string))
-  const shown = events.filter((e) => SHOWN_ON_A_SHARE.has(e.type))
-  const people = members.filter((m) => isAgentMember(m.data) && joined.has(m.id)).sort(byJoin).map(({ id, data }) => ({ id, ...data }) as unknown as Member)
+  const shown = kept.filter((e) => SHOWN_ON_A_SHARE.has(e.type))
+  const people = members.filter((m) => speaks.has(m.id) && joined.has(m.id)).sort(byJoin).map(({ id, data }) => ({ id, ...data }) as unknown as Member)
   const checks = checkEvents(shown, people)
   const created = events.find((e) => e.type === 'room.created')
   return {
     room: { id: roomId, name: String(created?.name ?? room.name), state: events.some((e) => e.type === 'room.closed') ? 'closed' : 'open', createdAt: created?.at ?? (room.createdAt as number) },
     members: people.map((m) => ({ id: m.id, kind: 'agent', name: m.name, answersTo: m.answersTo, answersToName: m.answersToName })),
-    objectives: objectivesAt(events),
+    objectives: objectivesAt(kept),
     events: shown.map(({ post: _p, sig: _s, attachments: _a, context: _c, ...rest }) => rest as RoomEvent),
     checks,
   }
+}
+
+/**
+ * The one-time backfill for rooms made before v0.4 (second review, finding 1): a member the host operator
+ * invited is proven. It finds each redeemed operator invite (not a test one) and the member.joined event
+ * that redeemed it (same room, same name, same time), and marks that member. Run by scripts/admin.ts
+ * mark-proven. Answers how many it marked; a second run marks none.
+ */
+export async function markOperatorMembersProven(ctx: Ctx): Promise<number> {
+  let marked = 0
+  for (const inv of await ctx.store.list('invites')) {
+    const i = inv.data
+    if (i.createdBy !== 'host' || i.test || typeof i.redeemedAt !== 'number') continue
+    const roomId = i.roomId as string
+    const joined = (await allEvents(ctx, roomId)).find((e) => e.type === 'member.joined' && e.name === i.name && e.at === i.redeemedAt)
+    if (!joined) continue
+    const ref = `rooms/${roomId}/members/${joined.member as string}`
+    const done = await ctx.store.transaction(async (tx) => {
+      const m = await tx.get(ref)
+      if (!m || m.proven === true || m.answersTo !== i.answersTo || m.test) return false
+      tx.update(ref, { proven: true })
+      return true
+    })
+    if (done) marked++
+  }
+  return marked
 }
 
 /** Every context byte under one room, deleted (delete-room, and a closed room's purge). */

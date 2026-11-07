@@ -59,7 +59,8 @@ export async function seedDevFixture(): Promise<{ ctx: rooms.Ctx; roomId: string
   const ada = await join("Ada's Pluma", 'ada')
   const stand = await join("Stand-in for Ben's Pluma", 'ben', true)
   const { objective } = (await ada('objective', { title: 'The shared lines', owner: 'ada', done: 'Ada decides on the exact words.' })) as { objective: string }
-  await stand('objective', { title: "Ben's profile", owner: 'ben', done: 'Ben decides.' })
+  // A test stand-in speaks for no one, so objectives, drafts and a person's words come from Ada's Pluma (v0.4).
+  await ada('objective', { title: 'The opening still', owner: 'ada', done: 'Ada picks the frame.' })
   await ada('objective.move', { objective, status: 'claimed' })
   await ada('message', { text: 'Claimed The shared lines. A first version is coming for Ada.' })
   await stand('message', { text: 'Test stand-in, speaking for no one.' })
@@ -79,7 +80,7 @@ export async function seedDevFixture(): Promise<{ ctx: rooms.Ctx; roomId: string
   // words and whose move is next. Its shared page needs only Ada's yes, because Ben's is a test stand-in.
   await ctx.store.transaction(async (tx) => { tx.update(`rooms/${roomId}`, { tether: true }) })
   const split = (await stand('step', { text: 'Proposed a split: Ada writes the lines, Ben checks them.' })) as { seq: number }
-  await stand('step', { text: 'Read the brief. Page 2 changes the plan.', said: { words: 'does the split help us', saidAt: new Date().toISOString() } })
+  await ada('step', { text: 'Ada read the brief. Page 2 changes the plan.', said: { words: 'does the split help us', saidAt: new Date().toISOString() } })
   await ada('step', { text: 'Dropped the split. One side writes, and the other reads.', reverses: [split.seq] })
   await ada('step', { text: 'Rewrote the opening to match page 2.', proof: [{ label: 'draft v2' }], next: (await rooms.read(ctx, { kind: 'person', person: 'ada' }, roomId, 0)).members.find((m) => m.test)!.id })
   const upTo = (await ctx.store.get(`rooms/${roomId}`))!.seq as number

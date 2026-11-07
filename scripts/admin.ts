@@ -12,6 +12,7 @@
 //   close-room     --room <id>                                         refuses writes from now on; its context files go 30 days later
 //   delete-room    --room <id> --confirm <id>                          the room, its thread, attachments, context files, keys and invites; no undo
 //   housekeep                                                           run the declared housekeeping now (the daily cron does this)
+//   mark-proven                                                         once after v0.4: members the operator invited become proven
 //
 // Context files (v0.3) live in the bucket named by ROOMS_CONTEXT_BUCKET.
 //
@@ -53,6 +54,7 @@ const verbs: Record<string, () => Promise<unknown>> = {
   'remove-legacy-person': () => rooms.removeLegacyPerson(ctx, need('room'), need('person')).then(() => ({ ok: true })),
   'close-room': () => rooms.closeRoom(ctx, need('room')).then(() => ({ closed: v.room })),
   housekeep: () => { needObjects(); return rooms.housekeep(ctx) },
+  'mark-proven': async () => ({ marked: await rooms.markOperatorMembersProven(ctx) }),
   'delete-room': async () => {
     const room = need('room')
     if (v.confirm !== room) { console.error('delete-room removes everything in the room, attachments and context files included, with no undo: pass --confirm <the same room id>'); process.exit(2) }

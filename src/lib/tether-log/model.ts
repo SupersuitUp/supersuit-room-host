@@ -59,7 +59,11 @@ export function tetherLog(input: TetherInput): TetherLogModel {
   const lastAt = events.at(-1)?.at ?? room.createdAt
   const lastStep = steps.at(-1)
   const nextId = lastStep?.next as string | undefined
+  // A taken-back version waits on nobody, and its approval settles nothing (second review, finding 3).
+  const takenBack = new Set(drafts.flatMap((d) => d.versions.filter((v) => v.redacted).map((v) => `${d.id}:${v.n}`)))
+  const decidedOn = new Map(events.filter((e) => e.type === 'decision').map((e) => [e.seq, `${String(e.draft)}:${String(e.version)}`]))
   const undecided = drafts.filter((d) => {
+    if (takenBack.has(`${d.id}:${d.latest}`)) return false
     const fp = d.versions.find((v) => v.n === d.latest)?.fingerprint
     return !d.decisions.some((x) => !x.redacted && x.version === d.latest && x.fingerprint === fp)
   })
@@ -78,7 +82,7 @@ export function tetherLog(input: TetherInput): TetherLogModel {
 
   const live = entries.filter((e) => e.reversedBy === undefined)
   const settled: Settled[] = [
-    ...live.filter((e) => e.kind === 'decision' && e.verdict === 'approve').map((e) => ({ text: e.words!, person: true, ref: `${e.saidBy}, No. ${e.no}` })),
+    ...live.filter((e) => e.kind === 'decision' && e.verdict === 'approve' && !takenBack.has(decidedOn.get(e.seq) ?? '')).map((e) => ({ text: e.words!, person: true, ref: `${e.saidBy}, No. ${e.no}` })),
     ...live.filter((e) => e.proof.length).map((e) => ({ text: e.text!, person: false, ref: `No. ${e.no}` })),
   ]
 

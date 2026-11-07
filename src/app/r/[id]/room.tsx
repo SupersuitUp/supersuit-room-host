@@ -136,7 +136,7 @@ export function RoomView({ id }: { id: string }) {
             const right = side === 'right'
             if (e.type === 'draft.version') {
               const d = v.drafts.find((x) => x.id === e.draft)
-              if (d && d.latest === e.version) return <DraftCard key={e.seq} draft={d} ownerName={ownerName(d.owner)} by={who} show={show} draws={draws} now={now} right={right} />
+              if (d && d.latest === e.version) return <DraftCard key={e.seq} draft={d} ownerName={ownerName(d.owner)} by={who} show={show} draws={draws} now={now} right={right} proven={new Set(v.members.filter((m) => m.proven).map((m) => m.id))} />
             }
             if (!isChat(e.type) || e.redacted) {
               return (
@@ -237,9 +237,10 @@ function Posted({ at, now, className = '' }: { at: number; now: number; classNam
   return <time dateTime={new Date(at).toISOString()} suppressHydrationWarning className={`text-xs text-mist/50 ${className}`}>{className ? label : ` · ${label}`}</time>
 }
 
-function DraftCard({ draft, ownerName, by, show, draws, now, right }: { draft: Draft; ownerName: string; by: { name: string; note: string }; show: (list: unknown) => React.ReactNode; draws: (list: unknown) => React.ReactNode; now: number; right: boolean }) {
+function DraftCard({ draft, ownerName, by, show, draws, now, right, proven }: { draft: Draft; ownerName: string; by: { name: string; note: string }; show: (list: unknown) => React.ReactNode; draws: (list: unknown) => React.ReactNode; now: number; right: boolean; proven: Set<string> }) {
   const latest = draft.versions.find((x) => x.n === draft.latest)!
-  const decision = draft.decisions.filter((a) => !a.redacted && a.version === latest.n && a.fingerprint === latest.fingerprint).at(-1)
+  // A decision counts only when it is not taken back, its version is not taken back, and a proven member posted it.
+  const decision = latest.redacted ? undefined : draft.decisions.filter((a) => !a.redacted && proven.has(a.by) && a.version === latest.n && a.fingerprint === latest.fingerprint).at(-1)
   return (
     <li className={`max-w-[92%] rounded-2xl border border-craft/60 p-4 ${right ? 'ml-auto rounded-br-md' : 'mr-auto rounded-bl-md'}`}>
       <div className="text-xs uppercase tracking-[0.2em] text-craft">Draft · version {latest.n} · for {ownerName}</div>

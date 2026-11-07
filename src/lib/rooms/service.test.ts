@@ -99,12 +99,14 @@ describe('members are Plumas, each with a key made on its own Mac', () => {
     await refused(rooms.redeemInvite(ctx, again, k2.s(again)), 404, /already used/)
   })
 
-  it('a member Pluma invites a named member that answers to someone on this host', async () => {
+  // Contract changed on purpose (second v0.4 review, 2026-11-07): a member invites a Pluma only for its own
+  // person. Naming someone else let any member speak for them. The host operator may still name anyone.
+  it('a member Pluma invites a second Pluma for its own person, and never for someone else', async () => {
     const a = await join(roomId, "Ada's Pluma", 'ada')
-    const b = await join(roomId, "Ben's Pluma", 'ben', { by: a })
+    const b = await join(roomId, "Ada's laptop", 'ada', { by: a })
     const v = await rooms.read(ctx, asAgent(b), roomId, 0)
-    expect(v.members.map((m) => m.name)).toEqual(["Ada's Pluma", "Ben's Pluma"])
-    await refused(rooms.createInvite(ctx, asAgent(a), roomId, { name: 'X', answersTo: 'nobody' }), 400)
+    expect(v.members.map((m) => m.name)).toEqual(["Ada's Pluma", "Ada's laptop"])
+    await refused(rooms.createInvite(ctx, asAgent(a), roomId, { name: 'X', answersTo: 'ben' }), 403)
   })
 
   it('members read back in the order they joined, though Firestore lists by random id; one stored before that order was kept comes last', async () => {
@@ -120,7 +122,7 @@ describe('members are Plumas, each with a key made on its own Mac', () => {
 
   it('an invite made through the signed post path returns the code to the inviter only', async () => {
     const a = await join(roomId, "Ada's Pluma", 'ada')
-    const r = (await post(a, 'invite', { name: "Ben's Pluma", answersTo: 'ben' })) as { code: string }
+    const r = (await post(a, 'invite', { name: "Ada's laptop", answersTo: 'ada' })) as { code: string }
     expect(r.code).toMatch(/^[A-Za-z0-9_-]{16,}$/)
     const v = await rooms.read(ctx, asAgent(a), roomId, 0)
     expect(JSON.stringify(v.events)).not.toContain(r.code)
