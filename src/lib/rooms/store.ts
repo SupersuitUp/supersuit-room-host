@@ -9,6 +9,8 @@ export interface Tx {
   get(path: string): Promise<Data | null>
   set(path: string, data: Data): void
   update(path: string, data: Data): void
+  /** Remove a document. A missing document is not an error, as in Firestore. */
+  delete(path: string): void
 }
 
 export interface ListOptions {
