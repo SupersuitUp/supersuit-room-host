@@ -3,7 +3,7 @@ import { generateKeyPairSync, sign, randomBytes } from 'node:crypto'
 import { MemoryStore } from '@/lib/rooms/memory-store'
 import * as rooms from '@/lib/rooms/service'
 import { canonical, publicKeyB64 } from '@/lib/rooms/signing'
-import { setCtxForTests, SESSION_COOKIE } from './ctx'
+import { setCtxForTests, SESSION_COOKIE, audienceFrom } from './ctx'
 import { setIdTokenVerifierForTests } from './auth'
 import { POST as postsPOST } from '@/app/api/rooms/[id]/posts/route'
 import { GET as eventsGET } from '@/app/api/rooms/[id]/events/route'
@@ -125,11 +125,11 @@ describe('reading', () => {
 describe('the session route', () => {
   it('a verified Google email on this host gets a session cookie; anyone else gets 403', async () => {
     setIdTokenVerifierForTests(async (t) => (t === 'good' ? { email: 'ada@example.com', email_verified: true } : t === 'unverified' ? { email: 'ada@example.com', email_verified: false } : { email: 'nobody@example.com', email_verified: true }))
-    const ok = await sessionPOST(new Request(H + '/api/session', { method: 'POST', body: JSON.stringify({ idToken: 'good' }) }))
+    const ok = await sessionPOST(new Request(H + '/api/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ idToken: 'good' }) }))
     expect(ok.status).toBe(200)
     expect(ok.headers.get('set-cookie')).toMatch(/HttpOnly/i)
-    expect((await sessionPOST(new Request(H + '/api/session', { method: 'POST', body: JSON.stringify({ idToken: 'unverified' }) }))).status).toBe(403)
-    expect((await sessionPOST(new Request(H + '/api/session', { method: 'POST', body: JSON.stringify({ idToken: 'stranger' }) }))).status).toBe(403)
+    expect((await sessionPOST(new Request(H + '/api/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ idToken: 'unverified' }) }))).status).toBe(403)
+    expect((await sessionPOST(new Request(H + '/api/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ idToken: 'stranger' }) }))).status).toBe(403)
   })
 })
 
@@ -171,7 +171,7 @@ describe('tethers (v0.4)', () => {
     const post = { v: 1, type: 'reader.link', room: roomId, member: ada.memberId, at: iso(), nonce: nonce() }
     const r = await postsPOST(new Request(`${H}/api/rooms/${roomId}/posts`, { method: 'POST', body: JSON.stringify({ post, sig: ada.s(post) }) }), params({ id: roomId }))
     const token = ((await r.json()).path as string).replace('/open/', '')
-    const open = () => openPOST(new Request(H + '/api/open', { method: 'POST', body: JSON.stringify({ token }) }))
+    const open = () => openPOST(new Request(H + '/api/open', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token }) }))
     const first = await open()
     expect(first.status).toBe(200)
     expect((await first.json()).room).toBe(roomId)
@@ -190,10 +190,43 @@ describe('a reader-link session (review finding 1)', () => {
     const post = { v: 1, type: 'reader.link', room: roomId, member: ada.memberId, at: iso(), nonce: nonce() }
     const r = await postsPOST(new Request(`${H}/api/rooms/${roomId}/posts`, { method: 'POST', body: JSON.stringify({ post, sig: ada.s(post) }) }), params({ id: roomId }))
     const token = ((await r.json()).path as string).replace('/open/', '')
-    const cookie = (await openPOST(new Request(H + '/api/open', { method: 'POST', body: JSON.stringify({ token }) }))).headers.get('set-cookie')!.split(';')[0]
+    const cookie = (await openPOST(new Request(H + '/api/open', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token }) }))).headers.get('set-cookie')!.split(';')[0]
     const list = await roomsGET(new Request(`${H}/api/rooms`, { headers: { cookie } }))
     expect((await list.json()).rooms.map((x: { id: string }) => x.id)).toEqual([roomId])
     expect((await eventsGET(new Request(`${H}/api/rooms/${other}/events`, { headers: { cookie } }), params({ id: other }))).status).toBe(404)
     expect((await eventsGET(new Request(`${H}/api/rooms/${roomId}/events`, { headers: { cookie } }), params({ id: roomId }))).status).toBe(200)
+  })
+})
+
+describe('the second review (2026-11-07)', () => {
+  it('4. a capped long poll answers at once with retryAfter in the body and a Retry-After header', async () => {
+    ctx.sleep = () => new Promise(() => {})
+    const seq = (await ctx.store.get(`rooms/${roomId}`))!.seq as number
+    const read = () => {
+      const req = { v: 1, type: 'read', room: roomId, member: ada.memberId, after: seq, at: iso(), nonce: nonce() }
+      return eventsGET(new Request(`${H}/api/rooms/${roomId}/events?after=${seq}&wait=25`, { headers: { 'x-room-request': Buffer.from(canonical(req)).toString('base64url'), 'x-room-signature': ada.s(req) } }), params({ id: roomId }))
+    }
+    void read(); void read()
+    await new Promise((r) => setTimeout(r, 5))
+    const capped = await read()
+    expect(capped.status).toBe(200)
+    expect(Number(capped.headers.get('retry-after'))).toBeGreaterThan(0)
+    expect((await capped.json()).retryAfter).toBeGreaterThan(0)
+  })
+
+  it('5. /api/open and /api/session take only a JSON body from this site, so another site cannot sign a person in', async () => {
+    const open = (headers: Record<string, string>) => openPOST(new Request(H + '/api/open', { method: 'POST', headers, body: JSON.stringify({ token: 'x' }) }))
+    expect((await open({})).status).toBe(415)
+    expect((await open({ 'content-type': 'text/plain' })).status).toBe(415)
+    expect((await open({ 'content-type': 'application/json', 'sec-fetch-site': 'cross-site' })).status).toBe(403)
+    expect((await open({ 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' })).status).toBe(404)
+    const session = (headers: Record<string, string>) => sessionPOST(new Request(H + '/api/session', { method: 'POST', headers, body: JSON.stringify({ idToken: 'good' }) }))
+    expect((await session({})).status).toBe(415)
+    expect((await session({ 'content-type': 'application/json', 'sec-fetch-site': 'cross-site' })).status).toBe(403)
+  })
+
+  it('6. the audience comes from ROOMS_AUDIENCE, and is the production origin by default', () => {
+    expect(audienceFrom({})).toBe('https://rooms.supersuit.co')
+    expect(audienceFrom({ ROOMS_AUDIENCE: 'https://rooms.example.org' })).toBe('https://rooms.example.org')
   })
 })

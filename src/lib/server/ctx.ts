@@ -1,7 +1,13 @@
 import 'server-only'
-import type { Ctx } from '@/lib/rooms/service'
+import { DEFAULT_AUDIENCE, type Ctx } from '@/lib/rooms/service'
 
 export const SESSION_COOKIE = 'room-session'
+
+/**
+ * The audience a tether-start must name on this deployment: ROOMS_AUDIENCE, its own origin, which a
+ * preview or a second host sets; the production origin when unset (second review, finding 6).
+ */
+export const audienceFrom = (env: Record<string, string | undefined>) => env.ROOMS_AUDIENCE || DEFAULT_AUDIENCE
 
 let override: Ctx | null = null
 let prod: Ctx | null = null
@@ -26,7 +32,7 @@ export async function getCtx(): Promise<Ctx> {
     const { getAdminDb, getContextBucket } = await import('./firebase-admin')
     const { suitDirectory } = await import('./directory')
     const bucket = getContextBucket()
-    prod = { store: new FirestoreStore(getAdminDb()), now: () => Date.now(), objects: bucket ? new GcsObjectStore(bucket) : undefined, directory: suitDirectory }
+    prod = { store: new FirestoreStore(getAdminDb()), now: () => Date.now(), objects: bucket ? new GcsObjectStore(bucket) : undefined, directory: suitDirectory, audience: audienceFrom(process.env) }
   }
   return prod
 }

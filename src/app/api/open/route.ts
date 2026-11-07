@@ -1,5 +1,5 @@
 import { getCtx, SESSION_COOKIE } from '@/lib/server/ctx'
-import { handle, json, body } from '@/lib/server/http'
+import { handle, json, sameSiteBody } from '@/lib/server/http'
 import * as rooms from '@/lib/rooms/service'
 
 export const runtime = 'nodejs'
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
 // here would spend the link before the person taps it.
 export async function POST(req: Request) {
   return handle(async () => {
-    const b = await body(req)
+    const b = await sameSiteBody(req)
     const opened = typeof b.token === 'string' ? await rooms.redeemReaderLink(await getCtx(), b.token) : null
     if (!opened) return json({ error: 'This link was already used, or it expired. Ask your Pluma for a new one.' }, 404)
     const res = json({ room: opened.roomId })

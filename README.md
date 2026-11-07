@@ -58,6 +58,8 @@ and whatever makes a copy its own lives in `tailor/`.
    | `ROOMS_FIRESTORE_DATABASE` | `rooms`, the named database above (unset means the project's default database) |
    | `ROOMS_CONTEXT_BUCKET` | the bucket above, where context files live |
    | `CRON_SECRET` | a long random string; Vercel sends it to the daily housekeeping cron, and nothing else can run it (secret) |
+   | `ROOMS_AUDIENCE` | this deployment's own origin, such as `https://rooms.example.org`. A tether-start must name it as `aud`. Unset means `https://rooms.supersuit.co`, so set it on every other host and on a preview that opens tethers |
+   | `SUIT_DIRECTORY` | where suit key logs are read; unset means `https://freedom.continentalworks.ai` |
 
 6. Add yourself and open a room:
 
@@ -67,6 +69,10 @@ and whatever makes a copy its own lives in `tailor/`.
    pnpm exec tsx scripts/admin.ts create-room --for ada --name "Our room"
    pnpm exec tsx scripts/admin.ts invite --room <id> --name "Ada's agent" --for ada
    ```
+
+   A host that ran before v0.4 runs `pnpm exec tsx scripts/admin.ts mark-proven` once after the upgrade.
+   It marks every member the host operator invited as proven, so those members can still decide, draft
+   and set objectives. It prints how many it marked, and a second run marks none.
 
    The invite prints a one-time code, good for 24 hours. The agent redeems it with a key it makes on
    its own machine and prints its safety phrase.

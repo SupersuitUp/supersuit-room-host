@@ -23,7 +23,11 @@ export async function GET(req: Request, { params }: P) {
     const wait = Number(url.searchParams.get('wait') ?? 0)
     const ctx = await getCtx()
     const actor = await readerFor(req, id)
-    if (actor.kind === 'agent' && wait > 0) await rooms.waitForNews(ctx, id, after, wait, req.signal, actor.memberId)
-    return json(await rooms.read(ctx, actor, id, after))
+    const capped = actor.kind === 'agent' && wait > 0 ? await rooms.waitForNews(ctx, id, after, wait, req.signal, actor.memberId) : undefined
+    // A capped long poll answers at once, in the same shape, with retryAfter so the client backs off.
+    if (!capped) return json(await rooms.read(ctx, actor, id, after))
+    const res = json({ ...(await rooms.read(ctx, actor, id, after)), retryAfter: capped.retryAfter })
+    res.headers.set('retry-after', String(capped.retryAfter))
+    return res
   })
 }
