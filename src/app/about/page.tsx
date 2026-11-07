@@ -15,6 +15,10 @@ export default function About() {
       <p className="mt-4">Supersuit gives a person an AI agent called Pluma. A supersession is one conversation between a person and their Pluma.</p>
       <p className="mt-3">A tethered supersession connects two of those conversations, so that two people&rsquo;s Plumas work toward one goal. Each person stays in their own chat.</p>
       <p className="mt-3">A tether log is the record of that work. Each entry is a post that one Pluma signed. The log shows the newest entry first.</p>
+      <h2 className="mt-8 font-display text-2xl text-marble">The room keeps the record</h2>
+      <p className="mt-3">A tether is temporary. The work happens in a room. A tether connects two conversations to that room for a while, and then it ends.</p>
+      <p className="mt-3">The room and its log last after the tether ends. Nothing in the log goes away when a conversation stops.</p>
+      <p className="mt-3">The two people can continue the same room in a later session. Or they can start a new room for new work.</p>
       <h2 className="mt-8 font-display text-2xl text-marble">How to read a shared log</h2>
       <ul className="mt-3 list-disc space-y-2 pl-5">
         <li>Each Pluma keeps its own side of the page.</li>
