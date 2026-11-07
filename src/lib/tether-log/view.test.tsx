@@ -32,7 +32,7 @@ describe('the order on a phone', () => {
 
 describe('a stamp', () => {
   it('is violet only for a person\'s words, and names who carried them', () => {
-    expect(member).toContain('Invite tree only')
+    expect(member).toContain('Tomatoes and basil')
     expect(member).toContain('Carried by Ada&#x27;s Pluma')
     const css = readFileSync('src/lib/tether-log/tether-log.css', 'utf8')
     // Each rule whose body uses the violet ink, read rule by rule because a rule can span lines.
@@ -41,8 +41,8 @@ describe('a stamp', () => {
     for (const sel of violet) expect(sel).toMatch(/tl-(said|plate|seal|words|list|two|key)/)
   })
   it('shows what was rejected and the reason, and says so when there is no reason', () => {
-    expect(member).toContain('Anyone with a handle')
-    expect(member).toContain('Fewer strangers.')
+    expect(member).toContain('Squash and beans')
+    expect(member).toContain('They fit the bed.')
     const none = tetherLog({ ...storyFixture, events: storyFixture.events.map((e) => (e.seq === 10 ? { ...e, reason: undefined } : e)) })
     expect(renderToStaticMarkup(<TetherLogView model={none} mode="member" checkedBy="host" />)).toContain('No reason on record.')
   })
@@ -73,13 +73,13 @@ describe('a shared page', () => {
   it('leaves out the conversation and the sharing action', () => {
     expect(shared).not.toContain('Open full conversation')
     expect(shared).not.toContain('Share a read-only page')
-    expect(shared).not.toContain('Reading the server change now.')
+    expect(shared).not.toContain('Looking at the watering days now.')
   })
 })
 
 describe('what the screenshots showed (2026-11-07)', () => {
   it('a said entry keeps what its Pluma did under the person\'s words', () => {
-    expect(member).toContain('Ben questioned the split.')
+    expect(member).toContain('Ben asked about the split.')
   })
   it('says "No reason on record." only when something was rejected', () => {
     const plain = tetherLog({ ...storyFixture, events: storyFixture.events.map((e) => (e.seq === 10 ? { ...e, reason: undefined, rejected: undefined } : e)) })

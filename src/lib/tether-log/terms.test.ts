@@ -34,3 +34,19 @@ describe('the folder stands alone', () => {
     }
   })
 })
+
+describe('the words read plainly (Simplified Technical English)', () => {
+  const glossed = (parts: readonly (string | { term: keyof typeof TERMS; plural?: boolean })[]) =>
+    parts.map((p) => (typeof p === 'string' ? p : `${(p.plural ? TERMS[p.term].plural : TERMS[p.term].label)} (${TERMS[p.term].gloss})`)).join('')
+  it('each sentence in COPY has at most 25 words, even with each word defined as a shared page defines it', () => {
+    for (const [name, parts] of Object.entries(COPY)) {
+      for (const sentence of glossed(parts).split(/(?<=[.!?])\s+/)) {
+        const n = sentence.split(/\s+/).filter(Boolean).length
+        expect(`${name}: ${n > 25 ? sentence : 'ok'}`).toBe(`${name}: ok`)
+      }
+    }
+  })
+  it('never says "operator", a word this page does not define', () => {
+    for (const [name, parts] of Object.entries(COPY)) expect(`${name}: ${/\boperators?\b/i.test(glossed(parts))}`).toBe(`${name}: false`)
+  })
+})

@@ -20,8 +20,8 @@ describe('tetherLog, on the shape of a real tether', () => {
     expect(m.entries.find((e) => e.seq === 8)).toMatchObject({ reverses: [1] })
   })
   it('shows a person\'s words with who carried them', () => {
-    expect(m.entries.find((e) => e.seq === 7)).toMatchObject({ kind: 'said', words: 'what does the split buy us', saidBy: 'Ben', carriedBy: "Ben's Pluma" })
-    expect(m.entries.find((e) => e.seq === 10)).toMatchObject({ kind: 'decision', words: 'Invite tree only', saidBy: 'Ada', rejected: 'Anyone with a handle', reason: 'Fewer strangers.' })
+    expect(m.entries.find((e) => e.seq === 7)).toMatchObject({ kind: 'said', words: 'why not just share the whole bed', saidBy: 'Ben', carriedBy: "Ben's Pluma" })
+    expect(m.entries.find((e) => e.seq === 10)).toMatchObject({ kind: 'decision', words: 'Tomatoes and basil', saidBy: 'Ada', rejected: 'Squash and beans', reason: 'They fit the bed.' })
   })
   it('says whose move it is from `next`, never from a guess', () => {
     expect(m.standing).toMatchObject({ state: 'Waiting', waitingOn: "Ben's Pluma", line: "Waiting on Ben's Pluma" })
@@ -34,13 +34,13 @@ describe('tetherLog, on the shape of a real tether', () => {
     expect(tetherLog(two).handoffs).toBe(2)
   })
   it('fills Settled and Still open', () => {
-    expect(m.settled[0]).toMatchObject({ text: 'Invite tree only', person: true })
-    expect(m.settled.map((s) => s.text)).toContain('Built requests on the server and put the change live.')
+    expect(m.settled[0]).toMatchObject({ text: 'Tomatoes and basil', person: true })
+    expect(m.settled.map((s) => s.text)).toContain('Booked the plot with the garden office.')
     expect(m.open.map((o) => o.text)).toContain("Waiting on Ben's Pluma")
     expect(m.open.map((o) => o.text)).toContain(S.objectives[0].done)
   })
   it('writes the story from typed events, one line for each decision and each proof', () => {
-    expect(m.story).toEqual(['Ada decided: "Invite tree only".', "Ada's Pluma: Built requests on the server and put the change live. Proof: commit af317d5."])
+    expect(m.story).toEqual(['Ada decided: "Tomatoes and basil".', "Ada's Pluma: Booked the plot with the garden office. Proof: booking receipt."])
   })
   it('keeps chat out of the entries and in the conversation', () => {
     expect(m.entries.some((e) => e.seq === 11)).toBe(false)
@@ -68,5 +68,14 @@ describe('tetherLog, on the shape of a real tether', () => {
     const lone = tetherLog({ ...S, members: [S.members[0]], events: S.events.slice(0, 2), drafts: [] })
     expect(lone.entries).toEqual([])
     expect(lone.right).toBeNull()
+  })
+})
+
+describe('the fixture is invented', () => {
+  it('holds no commit id and no words from a real tether', () => {
+    const all = JSON.stringify(S)
+    // A commit id: 7 to 40 hex characters with at least one letter and one digit (a timestamp has no letter).
+    expect(all).not.toMatch(/\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/)
+    for (const w of ['Invite tree', 'commit', 'card', 'server', 'handle', 'Supersuit']) expect(`${w}: ${all.includes(w)}`).toBe(`${w}: false`)
   })
 })
