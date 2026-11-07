@@ -25,6 +25,13 @@ describe('labels', () => {
     expect(seenAgo(undefined, now)).toBe('not seen yet')
   })
 
+  it('says a post was taken back, and never shows what it said (v0.4)', () => {
+    const red = { by: 'a-1', at: 1 }
+    expect(eventLine({ seq: 5, type: 'decision', by: 'a-1', at: 0, redacted: red }, members, {})).toBe('took back a post')
+    expect(eventLine({ seq: 6, type: 'redact', by: 'a-1', at: 0, target: 5 }, members, {})).toBe('took back post 5')
+    expect(eventLine({ seq: 7, type: 'room.closed', by: 'a-1', at: 0 }, members, {})).toBe('closed the room')
+  })
+
   it('writes a line for each kind of event, with no em dash', () => {
     const m = { o1: 'Shared lines' }
     expect(eventLine({ seq: 2, type: 'objective.moved', by: 'a-1', at: 0, objective: 'o1', status: 'claimed' }, members, m)).toBe('moved "Shared lines" to claimed')

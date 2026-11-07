@@ -33,8 +33,10 @@ export type Said = { words: string; saidAt: string }
 export type Amendment = { title: string; done: string; reason: string; by: string; at: number }
 /** An image a post carries, by the sha256 of bytes the host already holds for this room (v0.2). */
 export type Attachment = { sha256: string; type: string; width: number; height: number; size?: number; name?: string; alt?: string }
-export type DraftVersion = { n: number; text: string; fingerprint: string; by: string; at: number; attachments?: Attachment[]; context?: string[] }
-export type Decision = { id: string; draft: string; version: number; fingerprint: string; verdict: 'approve' | 'changes'; words: string; saidAt: string; by: string; at: number; rejected?: string; reason?: string; attachments?: Attachment[]; context?: string[] }
+/** A taken-back post (v0.4): who took it back and when. The text is gone. */
+export type Redacted = { by: string; at: number }
+export type DraftVersion = { n: number; text: string; fingerprint: string; by: string; at: number; redacted?: Redacted; attachments?: Attachment[]; context?: string[] }
+export type Decision = { id: string; draft: string; version: number; fingerprint: string; verdict: 'approve' | 'changes'; words: string; saidAt: string; by: string; at: number; rejected?: string; reason?: string; redacted?: Redacted; attachments?: Attachment[]; context?: string[] }
 export type Draft = { id: string; title: string; owner: string; objective?: string; latest: number; versions: DraftVersion[]; decisions: Decision[] }
 /** One file in the room's library (v0.3, section 7): the bytes by sha256, and why they are here. */
 export type ContextNote = { member: string; text: string; at: number }
@@ -42,7 +44,7 @@ export type ContextItem = {
   sha256: string; crc32c: string; size: number; name: string; contentType: string; why: string; objective?: string
   from: string; answersTo: string; at: number; notes: ContextNote[]; retired?: boolean; retiredAt?: number
 }
-export type RoomEvent = { seq: number; type: string; by: string; at: number; post?: Record<string, unknown>; sig?: string; [k: string]: unknown }
+export type RoomEvent = { seq: number; type: string; by: string; at: number; redacted?: Redacted; post?: Record<string, unknown>; sig?: string; [k: string]: unknown }
 
 export type RoomView = {
   room: Room

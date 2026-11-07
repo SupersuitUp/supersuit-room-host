@@ -377,6 +377,27 @@ async function reversesOf(tx: Pick<Tx, 'get'>, roomId: string, raw: unknown): Pr
   return raw as number[]
 }
 
+/** What still works after a room closes (v0.4): taking something back, and sharing or revoking a page. */
+const WORKS_AFTER_CLOSE = new Set(['redact', 'share.request', 'share.approve', 'share.revoke'])
+/** The events an author may take back. Bookkeeping says nothing a person could regret. */
+const REDACTABLE = new Set(['message', 'step', 'draft.version', 'decision'])
+
+/** The bytes of attachments that no remaining event names. Runs after the commit that removed the post. */
+async function releaseAttachments(ctx: Ctx, roomId: string, shas: string[]) {
+  if (!shas.length) return
+  const events = await ctx.store.list(`rooms/${roomId}/events`, { orderBy: 'seq' })
+  const named = new Set(events.flatMap((e) => ((e.data.attachments as Attachment[] | undefined) ?? []).map((a) => a.sha256)))
+  for (const sha of shas) {
+    if (named.has(sha)) continue
+    const ref = `rooms/${roomId}/attachments/${sha}`
+    const chunks = await ctx.store.list(`${ref}/chunks`)
+    await ctx.store.transaction(async (tx) => {
+      for (const c of chunks) tx.delete(`${ref}/chunks/${c.id}`)
+      tx.delete(ref)
+    })
+  }
+}
+
 const HANDLERS: Record<string, Handler> = {
   async message(tx, { roomId, room, member, post, sig, now, attachments, context }) {
     const body = attachments && (post.text === undefined || post.text === '') ? '' : text(post.text, 'message')
@@ -493,6 +514,41 @@ const HANDLERS: Record<string, Handler> = {
     return { decision: id }
   },
 
+  /** Any member closes a tether (v0.4). The text stays, so both operators can still read the log. */
+  async 'room.close'(tx, { roomId, room, member, post, sig, now }) {
+    tx.update(`rooms/${roomId}`, { state: 'closed', closedAt: now })
+    emit(tx, roomId, room, now, { type: 'room.closed', by: member.id, post, sig })
+    return { closed: true }
+  },
+
+  /**
+   * Only a post's author takes it back (v0.4). The event keeps its seq, type, author and time, and loses
+   * its text, its signed post and its signature, because a signature cannot outlive the words it covers.
+   * The new `redact` event says that a redaction happened, by whom and when, and nothing of what went.
+   */
+  async redact(tx, { ctx, roomId, room, member, post, sig, now, afterCommit }) {
+    const target = Number(post.target)
+    if (!Number.isSafeInteger(target)) throw new Refusal('target is the seq of the post to take back', 400)
+    const ref = `rooms/${roomId}/events/${pad(target)}`
+    const e = await tx.get(ref)
+    if (!e) throw new Refusal('there is no such entry', 404)
+    if (e.by !== member.id) throw new Refusal('only the Pluma that wrote a post takes it back', 403)
+    if (!REDACTABLE.has(e.type as string)) throw new Refusal(`a ${String(e.type)} entry cannot be taken back`, 400)
+    if (e.redacted) throw new Refusal('that post was already taken back', 409)
+    const versionRef = e.type === 'draft.version' ? `rooms/${roomId}/drafts/${e.draft}/versions/${e.version}` : null
+    const version = versionRef ? await tx.get(versionRef) : null
+    const decisionRef = e.type === 'decision' && e.decisionId ? `rooms/${roomId}/drafts/${e.draft}/decisions/${e.decisionId}` : null
+    const decision = decisionRef ? await tx.get(decisionRef) : null
+    const shas = ((e.attachments as Attachment[] | undefined) ?? []).map((a) => a.sha256)
+    const redacted = { by: member.id, at: now }
+    tx.set(ref, { seq: e.seq as number, type: e.type as string, by: e.by as string, at: e.at as number, redacted })
+    if (versionRef && version) tx.set(versionRef, { n: version.n as number, text: '', fingerprint: version.fingerprint as string, by: version.by as string, at: version.at as number, redacted })
+    if (decisionRef && decision) tx.set(decisionRef, { draft: decision.draft as string, version: decision.version as number, fingerprint: decision.fingerprint as string, verdict: decision.verdict as string, words: '', saidAt: decision.saidAt as string, by: decision.by as string, at: decision.at as number, redacted })
+    const seq = emit(tx, roomId, room, now, { type: 'redact', by: member.id, target, post, sig })
+    afterCommit.push(() => releaseAttachments(ctx, roomId, shas))
+    return { seq }
+  },
+
   // ---- the context library (v0.3, section 7) ----
 
   /** List an item, only once the object store holds exactly the bytes signed: that size and that crc32c. */
@@ -555,7 +611,7 @@ export async function submitPost(ctx: Ctx, roomId: string, post: Record<string, 
   let after: (() => Promise<void>)[] = []
   const out = await ctx.store.transaction(async (tx) => {
     const { room, member } = await memberOf(tx, { kind: 'agent', roomId, memberId }, roomId)
-    requireOpen(room)
+    if (!WORKS_AFTER_CLOSE.has(type)) requireOpen(room)
     const nonceRef = `rooms/${roomId}/nonces/${memberId}~${post.nonce}`
     if (await tx.get(nonceRef)) throw new Refusal('this post was already received', 409)
     const attachments = post.attachments === undefined ? undefined : await attachmentsOf(tx, roomId, type, post.attachments)

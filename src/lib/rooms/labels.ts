@@ -33,7 +33,10 @@ const ownerName = (members: Member[], person: unknown) =>
 /** The line a non-message event reads as, after the actor's name. */
 export function eventLine(e: RoomEvent, members: Member[], objectives: Record<string, string>): string {
   const obj = (id: unknown) => `"${objectives[String(id)] ?? 'an objective'}"`
+  // v0.4: a taken-back post keeps only that it happened.
+  if (e.redacted) return 'took back a post'
   switch (e.type) {
+    case 'redact': return `took back post ${String(e.target)}`
     case 'room.created': return 'opened the room'
     case 'room.closed': return 'closed the room'
     case 'member.joined': return e.phrase ? `joined, safety phrase "${String(e.phrase)}"` : 'joined'

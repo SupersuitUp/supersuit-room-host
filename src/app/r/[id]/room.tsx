@@ -135,7 +135,7 @@ export function RoomView({ id }: { id: string }) {
               const d = v.drafts.find((x) => x.id === e.draft)
               if (d && d.latest === e.version) return <DraftCard key={e.seq} draft={d} ownerName={ownerName(d.owner)} by={who} show={show} draws={draws} now={now} right={right} />
             }
-            if (!isChat(e.type)) {
+            if (!isChat(e.type) || e.redacted) {
               return (
                 <li key={e.seq} className="px-6 text-center text-xs text-mist/50">
                   <span className="text-mist/70">{who.name}</span> {eventLine(e, v.members, objectiveTitles)}<Posted at={e.at} now={now} />
