@@ -27,8 +27,11 @@ import {
   type Actor, type Attachment, type Proof, type Said, type ContextItem, type Decision, type Draft, type DraftVersion, type Member, type Objective, type Room, type RoomEvent, type RoomView,
 } from './types'
 
-/** objects is the object store for context bytes (v0.3); a host without one refuses context requests. */
-export type Ctx = { store: Store; now: () => number; objects?: ObjectStore }
+/**
+ * objects is the object store for context bytes (v0.3); a host without one refuses context requests.
+ * sleep is the long poll's wait (v0.4), replaced in tests.
+ */
+export type Ctx = { store: Store; now: () => number; objects?: ObjectStore; sleep?: (ms: number) => Promise<void>; directory?: unknown }
 export type { ContextItem }
 /** Who may invite: the host operator (scripts/admin.ts) or a member Pluma. Never a person directly. */
 export type Inviter = 'operator' | Actor
@@ -303,6 +306,24 @@ export async function read(ctx: Ctx, actor: Actor, roomId: string, after: number
     context: library.map((c) => itemOf(c.data)),
     cursor: evs.length ? evs[evs.length - 1].seq : Math.max(Number(after) || 0, 0),
     you,
+  }
+}
+
+export const WAIT_MAX_SECONDS = 25
+const POLL_MS = 1_500
+
+/**
+ * The long poll (v0.4). Waits until the room moves past `after`, closes, or the wait ends. It reads
+ * one document through the Store contract, every 1.5 seconds, because the contract has no watch.
+ */
+export async function waitForNews(ctx: Ctx, roomId: string, after: number, waitSeconds: number, signal?: AbortSignal): Promise<void> {
+  const seconds = Math.min(Math.max(Number(waitSeconds) || 0, 0), WAIT_MAX_SECONDS)
+  const polls = Math.ceil((seconds * 1000) / POLL_MS)
+  const sleep = ctx.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  for (let i = 0; i < polls; i++) {
+    const room = await ctx.store.get(`rooms/${roomId}`)
+    if (!room || (room.seq as number) > after || room.state !== 'open' || signal?.aborted) return
+    await sleep(POLL_MS)
   }
 }
 

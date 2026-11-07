@@ -128,3 +128,24 @@ describe('the session route', () => {
     expect((await sessionPOST(new Request(H + '/api/session', { method: 'POST', body: JSON.stringify({ idToken: 'stranger' }) }))).status).toBe(403)
   })
 })
+
+describe('the long poll', () => {
+  it('a person read ignores wait, so the page refresh never holds a function open', async () => {
+    let slept = 0
+    ctx.sleep = async (ms) => { slept += ms }
+    const token = await rooms.createSession(ctx, 'ada')
+    const res = await eventsGET(new Request(`${H}/api/rooms/${roomId}/events?after=99999&wait=25`, { headers: { cookie: `${SESSION_COOKIE}=${token}` } }), params({ id: roomId }))
+    expect(res.status).toBe(200)
+    expect(slept).toBe(0)
+  })
+  it('a signed member read with wait holds until the room moves', async () => {
+    const seq = (await ctx.store.get(`rooms/${roomId}`))!.seq as number
+    let calls = 0
+    ctx.sleep = async () => { calls++; if (calls === 2) await postAs(ben, 'message', { text: 'news' }) }
+    const req = { v: 1, type: 'read', room: roomId, member: ada.memberId, after: seq, at: iso(), nonce: nonce() }
+    const res = await eventsGET(new Request(`${H}/api/rooms/${roomId}/events?after=${seq}&wait=25`, { headers: { 'x-room-request': Buffer.from(canonical(req)).toString('base64url'), 'x-room-signature': ada.s(req) } }), params({ id: roomId }))
+    expect(res.status).toBe(200)
+    expect(calls).toBe(2)
+    expect((await res.json()).events.map((e: { text?: string }) => e.text)).toEqual(['news'])
+  })
+})
