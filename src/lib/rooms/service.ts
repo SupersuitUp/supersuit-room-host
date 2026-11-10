@@ -170,9 +170,11 @@ async function activeMemberCount(ctx: Ctx, roomId: string) {
  * A one-time door for one named member, open 24 hours unless it asks for up to 336 (v0.4). The code is
  * shown once; only its digest is kept.
  */
-export async function createInvite(ctx: Ctx, by: Inviter, roomId: string, p: { name: string; answersTo: string; test?: boolean; ttlHours?: number; handle?: string; personName?: string; nonceRef?: string }): Promise<{ code: string }> {
+export async function createInvite(ctx: Ctx, by: Inviter, roomId: string, p: { name: string; answersTo: string; test?: boolean; ttlHours?: number; handle?: string; personName?: string; nonceRef?: string; open?: boolean }): Promise<{ code: string }> {
+  // An open invite names nobody: the joiner proves their own suit and handle at the join (2026-11-10).
+  if (p.open && (p.handle || p.answersTo)) throw new Refusal('an open invite names nobody: no handle and no person', 400)
   // Only a handle invite names a handle person, and its joiner must prove the suit (review finding 1).
-  if (!p.handle && p.answersTo.startsWith('@')) throw new Refusal('a handle person is invited by handle', 400)
+  if (!p.open && !p.handle && p.answersTo.startsWith('@')) throw new Refusal('a handle person is invited by handle', 400)
   const ttl = Math.min(Math.max(Number(p.ttlHours) || 24, 1), MAX_INVITE_HOURS) * 3_600_000
   const code = randomBytes(16).toString('hex') // hex: a base64url code can start with '-', which a CLI reads as a flag
   await ctx.store.transaction(async (tx) => {
@@ -187,11 +189,11 @@ export async function createInvite(ctx: Ctx, by: Inviter, roomId: string, p: { n
       room = m.room
       inviter = m.member.id
       // A member invites a Pluma only for its own person; the host operator may name anyone (second review, finding 1).
-      if (!p.handle && p.answersTo !== m.member.answersTo) throw new Refusal('a Pluma invites another Pluma only for its own person', 403)
+      if (!p.open && !p.handle && p.answersTo !== m.member.answersTo) throw new Refusal('a Pluma invites another Pluma only for its own person', 403)
       inviterProven = m.member.proven === true
     }
     requireOpen(room)
-    if (!p.handle) await personName(tx, p.answersTo)
+    if (!p.open && !p.handle) await personName(tx, p.answersTo)
     // A replayed invite post mints nothing (review finding 6): its nonce is kept in this transaction.
     if (p.nonceRef && (await tx.get(p.nonceRef))) throw new Refusal('this post was already received', 409)
     if (p.nonceRef) tx.set(p.nonceRef, { at: ctx.now() })
@@ -199,10 +201,11 @@ export async function createInvite(ctx: Ctx, by: Inviter, roomId: string, p: { n
     // person, or the joiner must sign with the person's suit key (a handle invite).
     const invite: Data = {
       roomId, name: text(p.name, 'member name', 80), answersTo: p.answersTo, test: p.test === true,
-      createdBy: inviter, expiresAt: ctx.now() + ttl, redeemedAt: null, proven: (by === 'operator' && p.test !== true) || inviterProven || !!p.handle,
+      createdBy: inviter, expiresAt: ctx.now() + ttl, redeemedAt: null, proven: (by === 'operator' && p.test !== true) || inviterProven || !!p.handle || p.open === true,
     }
     // A handle invite names no one: the person's name comes from their own suit-signed join (second review, finding 2).
     if (p.handle) invite.handle = p.handle
+    if (p.open) invite.open = true
     tx.set(`invites/${sha256(code)}`, invite)
     if (inviter !== 'host') emit(tx, roomId, room, ctx.now(), { type: 'member.invited', by: inviter, name: p.name, answersTo: p.answersTo })
   })
@@ -229,10 +232,14 @@ export async function redeemInvite(ctx: Ctx, req: Record<string, unknown>, sig: 
   if (pre?.redeemedAt) throw new Refusal('this invite was already used; if that was not your Pluma, tell whoever sent it', 404)
   if (pre && (await activeMemberCount(ctx, pre.roomId as string)) >= MAX_MEMBERS) throw new Refusal(`a room holds at most ${MAX_MEMBERS} members`, 409)
   // v0.4: a handle invite is redeemed only with the suit's signature over the join (review finding 1).
-  if (pre?.handle) {
+  // An open invite takes the handle the joiner names, proven the same way (2026-11-10).
+  const joinHandle = pre?.open === true ? optString(req.handle) : undefined
+  if (pre?.open === true && (!joinHandle || !checkHandle(joinHandle).ok)) throw new Refusal('an open invite is joined with your own suit: name your handle and sign the join with your suit key', 401)
+  const proveHandle = (pre?.handle as string | undefined) ?? joinHandle
+  if (proveHandle) {
     const { suitSig, ...bare } = req
-    const suit = await directoryOf(ctx)(pre.handle as string)
-    if (!suit || !suit.keys.some((k) => verifySig(bare, suitSig, k))) throw new Refusal('a handle invite needs the suit key of that handle to sign the join', 401)
+    const suit = await directoryOf(ctx)(proveHandle)
+    if (!suit || !suit.keys.some((k) => verifySig(bare, suitSig, k))) throw new Refusal(pre?.handle ? 'a handle invite needs the suit key of that handle to sign the join' : 'an open invite needs the suit key of the handle you name to sign the join', 401)
   }
   const memberId = newId('a-')
   const fp = keyFingerprint(req.publicKey)
@@ -247,16 +254,19 @@ export async function redeemInvite(ctx: Ctx, req: Record<string, unknown>, sig: 
     if (!room) throw NOT_FOUND()
     requireOpen(room)
     if (invite.handle && invite.handle !== pre?.handle) throw NOT_FOUND()
-    const person = invite.handle ? await tx.get(`people/${invite.answersTo}`) : null
-    const joinName = req.personName === undefined ? (invite.handle as string) : text(req.personName, "the person's name", 80)
-    const answersToName = invite.handle ? ((person?.name as string | undefined) ?? joinName) : await personName(tx, invite.answersTo as string)
+    if (invite.open === true && pre?.open !== true) throw NOT_FOUND()
+    const handle = (invite.handle as string | undefined) ?? (invite.open === true ? joinHandle : undefined)
+    const answersTo = invite.open === true ? handlePerson(handle as string) : (invite.answersTo as string)
+    const person = handle ? await tx.get(`people/${answersTo}`) : null
+    const joinName = req.personName === undefined ? (handle as string) : text(req.personName, "the person's name", 80)
+    const answersToName = handle ? ((person?.name as string | undefined) ?? joinName) : await personName(tx, answersTo)
     const now = ctx.now()
-    if (invite.handle && !person) tx.set(`people/${invite.answersTo}`, { name: answersToName, emailDigests: [], handle: invite.handle })
+    if (handle && !person) tx.set(`people/${answersTo}`, { name: answersToName, emailDigests: [], handle })
     tx.update(inviteRef, { redeemedAt: now })
     tx.set(`memberKeys/${memberId}`, { roomId, publicKey: req.publicKey })
     const joinedSeq = emit(tx, roomId, room, now, { type: 'member.joined', by: memberId, member: memberId, name: invite.name as string, phrase })
     // Firestore lists documents by id, and member ids are random, so join order is kept on the member.
-    const member: Data = { kind: 'agent', name: invite.name, answersTo: invite.answersTo, answersToName, publicKey: req.publicKey, fingerprint: fp, phrase, lastSeenAt: now, joinedSeq }
+    const member: Data = { kind: 'agent', name: invite.name, answersTo, answersToName, publicKey: req.publicKey, fingerprint: fp, phrase, lastSeenAt: now, joinedSeq }
     if (invite.test) member.test = true
     if (invite.proven === true) member.proven = true
     tx.set(`rooms/${roomId}/members/${memberId}`, member)
@@ -756,11 +766,13 @@ export async function submitPost(ctx: Ctx, roomId: string, post: Record<string, 
   if (type === 'invite') {
     // v0.4: an invite may name a suit handle. The person is made only when a join proves that suit.
     const handle = optString(post.handle)
+    const open = post.open === true
+    if (open && (handle || post.answersTo !== undefined)) throw new Refusal('an open invite names nobody: no handle and no person', 400)
     await memberOf(ctx.store, { kind: 'agent', roomId, memberId }, roomId)
     if (handle && (!checkHandle(handle).ok || !(await directoryOf(ctx)(handle)))) throw new Refusal('no suit holds that handle', 400)
     const { code } = await createInvite(ctx, { kind: 'agent', roomId, memberId }, roomId, {
-      name: String(post.name ?? ''), answersTo: handle ? handlePerson(handle) : String(post.answersTo ?? ''), ttlHours: Number(post.ttlHours) || undefined,
-      handle, nonceRef: `rooms/${roomId}/nonces/${memberId}~${post.nonce}`,
+      name: String(post.name ?? ''), answersTo: open ? '' : handle ? handlePerson(handle) : String(post.answersTo ?? ''), ttlHours: Number(post.ttlHours) || undefined,
+      handle, open, nonceRef: `rooms/${roomId}/nonces/${memberId}~${post.nonce}`,
     })
     return { code }
   }
