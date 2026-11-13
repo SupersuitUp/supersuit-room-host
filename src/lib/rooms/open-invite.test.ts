@@ -61,6 +61,18 @@ describe('an open invite', () => {
     await refused(joinOpen(await openInvite(ada), 'ben-franklin', suitA, ada.roomId), 401)
     await refused(joinOpen(await openInvite(ada), 'nobody-here', suitB, ada.roomId), 401)
   })
+  it("names the joiner's Pluma after the joiner, never the placeholder the inviter wrote (supersuit-dev#2747)", async () => {
+    const ada = await start()
+    const code = await openInvite(ada)
+    const k = pluma()
+    const bare: Record<string, unknown> = { v: 1, type: 'join', code, publicKey: k.pub, at: iso(), nonce: nonce(), personName: 'Ben Franklin', handle: 'ben-franklin' }
+    const req = { ...bare, suitSig: signEntry(bare, suitB.priv).sig }
+    const r = await rooms.redeemInvite(ctx, req, k.s(req))
+    expect(r.name).toBe("Ben's Pluma")
+    const v = await rooms.read(ctx, asAgent(ada), ada.roomId, 0)
+    expect(v.members.find((x) => x.id === r.memberId)!.name).toBe("Ben's Pluma")
+    expect(v.events.find((e) => e.type === 'member.joined' && e.member === r.memberId)?.name).toBe("Ben's Pluma")
+  })
   it('works once', async () => {
     const ada = await start()
     const code = await openInvite(ada)

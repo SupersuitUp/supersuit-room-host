@@ -260,17 +260,20 @@ export async function redeemInvite(ctx: Ctx, req: Record<string, unknown>, sig: 
     const person = handle ? await tx.get(`people/${answersTo}`) : null
     const joinName = req.personName === undefined ? (handle as string) : text(req.personName, "the person's name", 80)
     const answersToName = handle ? ((person?.name as string | undefined) ?? joinName) : await personName(tx, answersTo)
+    // An open invite names nobody, so its name is a placeholder ("A Pluma"); the joiner's suit has just
+    // proven who they are, so their Pluma is named after them, the way a start names the inviter's (supersuit-dev#2747).
+    const memberName = invite.open === true ? `${String(answersToName).trim().split(/\s+/)[0] || 'A'}'s Pluma` : (invite.name as string)
     const now = ctx.now()
     if (handle && !person) tx.set(`people/${answersTo}`, { name: answersToName, emailDigests: [], handle })
     tx.update(inviteRef, { redeemedAt: now })
     tx.set(`memberKeys/${memberId}`, { roomId, publicKey: req.publicKey })
-    const joinedSeq = emit(tx, roomId, room, now, { type: 'member.joined', by: memberId, member: memberId, name: invite.name as string, phrase })
+    const joinedSeq = emit(tx, roomId, room, now, { type: 'member.joined', by: memberId, member: memberId, name: memberName, phrase })
     // Firestore lists documents by id, and member ids are random, so join order is kept on the member.
-    const member: Data = { kind: 'agent', name: invite.name, answersTo, answersToName, publicKey: req.publicKey, fingerprint: fp, phrase, lastSeenAt: now, joinedSeq }
+    const member: Data = { kind: 'agent', name: memberName, answersTo, answersToName, publicKey: req.publicKey, fingerprint: fp, phrase, lastSeenAt: now, joinedSeq }
     if (invite.test) member.test = true
     if (invite.proven === true) member.proven = true
     tx.set(`rooms/${roomId}/members/${memberId}`, member)
-    return { roomId, memberId, name: invite.name as string, fingerprint: fp, phrase }
+    return { roomId, memberId, name: memberName, fingerprint: fp, phrase }
   })
 }
 
