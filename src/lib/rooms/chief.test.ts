@@ -31,7 +31,7 @@ describe('the chief', () => {
     expect((await rooms.read(ctx, { kind: 'person', person: 'cara' }, roomId, 0)).room.chief).toBe(ada.memberId)
   })
 
-  it('is handed on only by the chief, to an active member, and the log records it', async () => {
+  it('is handed on by the chief, to an active member, and the log records it', async () => {
     await refused(post(ctx, ben, 'chief', { to: cara.memberId }), 403)
     await refused(post(ctx, ada, 'chief', { to: 'a-nobody' }), 400)
     await refused(post(ctx, ada, 'chief', { to: ada.memberId }), 400)
@@ -40,6 +40,42 @@ describe('the chief', () => {
     expect(v.room.chief).toBe(cara.memberId)
     expect(v.events.at(-1)).toMatchObject({ seq, type: 'chief.changed', by: ada.memberId, from: ada.memberId, to: cara.memberId })
     await refused(post(ctx, ada, 'chief', { to: ben.memberId }), 403)
+  })
+
+  it('changes when every other operator in the room says yes, in their own words', async () => {
+    const said = (words: string) => ({ words, saidAt: '2026-11-17T11:00:00.000Z' })
+    // A Pluma that is not the chief carries its person's words, or nothing happens.
+    await refused(post(ctx, ben, 'chief', { to: cara.memberId }), 403)
+    const one = await post(ctx, ben, 'chief', { to: cara.memberId, said: said('Cara should lead this') }) as { changed: boolean; waitingOn: string[] }
+    expect(one.changed).toBe(false)
+    expect(one.waitingOn).toEqual(['cara'])
+    let v = await view(ada)
+    expect(v.room.chief).toBe(ada.memberId)
+    expect(v.events.at(-1)).toMatchObject({ type: 'chief.vote', by: ben.memberId, to: cara.memberId, said: said('Cara should lead this') })
+    const two = await post(ctx, cara, 'chief', { to: cara.memberId, said: said('Yes, I will lead') }) as { changed: boolean }
+    expect(two.changed).toBe(true)
+    v = await view(ada)
+    expect(v.room.chief).toBe(cara.memberId)
+    expect(v.events.at(-1)).toMatchObject({ type: 'chief.changed', from: ada.memberId, to: cara.memberId, by: 'host' })
+    expect(v.room.chiefVotes ?? {}).toEqual({})
+  })
+
+  it('counts a vote only for the same member, and a later vote replaces an earlier one', async () => {
+    const said = { words: 'yes', saidAt: '2026-11-17T11:00:00.000Z' }
+    await post(ctx, ben, 'chief', { to: cara.memberId, said })
+    const split = await post(ctx, cara, 'chief', { to: ben.memberId, said }) as { changed: boolean }
+    expect(split.changed).toBe(false)
+    expect((await view(ada)).room.chief).toBe(ada.memberId)
+    const agreed = await post(ctx, ben, 'chief', { to: ben.memberId, said }) as { changed: boolean }
+    expect(agreed.changed).toBe(true)
+    expect((await view(ada)).room.chief).toBe(ben.memberId)
+  })
+
+  it('a hand-off by the chief clears the votes', async () => {
+    const said = { words: 'yes', saidAt: '2026-11-17T11:00:00.000Z' }
+    await post(ctx, ben, 'chief', { to: cara.memberId, said })
+    await post(ctx, ada, 'chief', { to: ben.memberId })
+    expect((await view(ada)).room.chiefVotes ?? {}).toEqual({})
   })
 
   it('passes to the earliest member left when the chief is retired', async () => {

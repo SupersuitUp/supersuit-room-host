@@ -28,7 +28,7 @@ export type Member = {
 }
 
 /** tether marks a room a Pluma opened itself under its operator's suit key (v0.4). */
-export type Room = { id: string; name: string; state: 'open' | 'closed'; createdBy: string; createdAt: number; seq: number; closedAt?: number; contextPurgedAt?: number; tether?: boolean; /** The member that stewards the room (supersuit-dev#2756); every read names one. */ chief?: string }
+export type Room = { id: string; name: string; state: 'open' | 'closed'; createdBy: string; createdAt: number; seq: number; closedAt?: number; contextPurgedAt?: number; tether?: boolean; /** The member that stewards the room (supersuit-dev#2756); every read names one. */ chief?: string; /** Each person's yes to a new chief, by person, until the chief changes. */ chiefVotes?: Record<string, string> }
 export type Objective = { id: string; title: string; owner: string; done: string; status: ObjectiveStatus; claimedBy?: string; updatedAt: number; amended?: Amendment[] }
 /** A proof a step carries (v0.4): what shows the work was done, and where to see it. */
 export type Proof = { label: string; href?: string }
