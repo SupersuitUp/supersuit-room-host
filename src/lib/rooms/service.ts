@@ -642,19 +642,37 @@ const HANDLERS: Record<string, Handler> = {
   },
 
   /**
-   * The chief hands the room on to another active member (supersuit-dev#2756). Only the chief may: a room of
-   * three or more needs one Pluma that keeps the plan and names whose move it is, and a lead nobody gave up
-   * is not a lead. A retired chief's room falls to the earliest member left, who may hand it on in turn.
+   * Who leads a room of three or more (supersuit-dev#2756). The chief hands the lead on to another active
+   * member at once. Any other Pluma carries its own person's yes, in their words: when every operator in the
+   * room besides the chief's own has said yes to the same member, the lead moves. That is how a room replaces
+   * a chief whose Pluma has gone quiet. A change of chief clears the votes.
    */
   async chief(tx, { ctx, roomId, room, member, post, sig, now }) {
     const to = String(post.to ?? '')
     const target = to ? await tx.get(`rooms/${roomId}/members/${to}`) : null
     if (!isAgentMember(target) || target!.retired) throw new Refusal('that member is not in this room', 400)
-    const current = chiefAmong(room, await ctx.store.list(`rooms/${roomId}/members`))
-    if (current !== member.id) throw new Refusal('only the chief of this room hands it on', 403)
-    if (to === member.id) throw new Refusal('you are already the chief', 400)
-    tx.update(`rooms/${roomId}`, { chief: to })
-    return { seq: emit(tx, roomId, room, now, { type: 'chief.changed', by: member.id, from: member.id, to, post, sig }) }
+    const members = await ctx.store.list(`rooms/${roomId}/members`)
+    const current = chiefAmong(room, members)
+    if (to === current) throw new Refusal('that member already leads this room', 400)
+    if (current === member.id) {
+      tx.update(`rooms/${roomId}`, { chief: to, chiefVotes: {} })
+      return { changed: true, seq: emit(tx, roomId, room, now, { type: 'chief.changed', by: member.id, from: member.id, to, post, sig }) }
+    }
+    if (post.said === undefined) throw new Refusal("only the chief hands the lead on; any other Pluma carries its person's yes, in their words (said)", 403)
+    requireProven(member, "a person's yes")
+    const said = saidOf(post.said, now)
+    const votes = { ...((room.chiefVotes as Record<string, string> | undefined) ?? {}), [member.answersTo]: to }
+    const chiefPerson = members.find((m) => m.id === current)?.data.answersTo
+    const needed = [...new Set(members.filter((m) => isAgentMember(m.data) && !m.data.retired).map((m) => m.data.answersTo as string))].filter((p) => p !== chiefPerson)
+    const waitingOn = needed.filter((p) => votes[p] !== to)
+    const seq = emit(tx, roomId, room, now, { type: 'chief.vote', by: member.id, to, said, post, sig })
+    if (waitingOn.length) {
+      tx.update(`rooms/${roomId}`, { chiefVotes: votes })
+      return { changed: false, seq, waitingOn }
+    }
+    tx.update(`rooms/${roomId}`, { chief: to, chiefVotes: {} })
+    emit(tx, roomId, room, now, { type: 'chief.changed', by: 'host', from: current ?? undefined, to })
+    return { changed: true, seq }
   },
 
   /** Any member closes the room (v0.4): the end of the room, not of one tether. The text stays, so its readers can still read it. */
