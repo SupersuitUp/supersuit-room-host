@@ -162,6 +162,16 @@ function emit(tx: Tx, roomId: string, room: Data, now: number, event: Omit<RoomE
 const joinOrder = (d: Data) => (typeof d.joinedSeq === 'number' ? d.joinedSeq : Infinity)
 const byJoin = (a: Doc, b: Doc) => joinOrder(a.data) - joinOrder(b.data) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 
+/**
+ * The chief of a room (supersuit-dev#2756): the member the room says leads it, while that member is active;
+ * else the earliest active member to join, so a room never goes without one. Null in a room with no members.
+ */
+function chiefAmong(room: Data, members: Doc[]): string | null {
+  const active = members.filter((m) => isAgentMember(m.data) && !m.data.retired).sort(byJoin)
+  if (typeof room.chief === 'string' && active.some((m) => m.id === room.chief)) return room.chief
+  return active[0]?.id ?? null
+}
+
 async function activeMemberCount(ctx: Ctx, roomId: string) {
   return (await ctx.store.list(`rooms/${roomId}/members`)).filter((m) => isAgentMember(m.data) && !m.data.retired).length
 }
@@ -361,8 +371,9 @@ export async function read(ctx: Ctx, actor: Actor, roomId: string, after: number
     }
   }))
   const evs = events.map((e) => e.data as unknown as RoomEvent)
+  const chief = chiefAmong(room, members)
   return {
-    room: { id: roomId, ...room } as unknown as Room,
+    room: { id: roomId, ...room, ...(chief ? { chief } : {}) } as unknown as Room,
     members: members.filter((m) => isAgentMember(m.data)).sort(byJoin).map(({ id, data: { joinedSeq: _, ...rest } }) => ({ id, ...rest }) as unknown as Member),
     objectives: objectives.map((o) => ({ id: o.id, ...o.data }) as unknown as Objective),
     drafts: fullDrafts,
@@ -549,7 +560,10 @@ const HANDLERS: Record<string, Handler> = {
   async step(tx, { roomId, room, member, post, sig, now, attachments, context }) {
     const body = text(post.text, 'step')
     if (post.said !== undefined) requireProven(member, "a person's words")
-    if (post.next !== undefined && !isAgentMember(await tx.get(`rooms/${roomId}/members/${post.next}`))) throw new Refusal('that member is not in this room', 400)
+    if (post.next !== undefined) {
+      const next = await tx.get(`rooms/${roomId}/members/${post.next}`)
+      if (!isAgentMember(next) || next!.retired) throw new Refusal('that member is not in this room', 400)
+    }
     if (post.objective !== undefined && !(await tx.get(`rooms/${roomId}/objectives/${post.objective}`))) throw new Refusal('no such objective', 400)
     const reverses = await reversesOf(tx, roomId, post.reverses)
     const seq = emit(tx, roomId, room, now, {
@@ -625,6 +639,22 @@ const HANDLERS: Record<string, Handler> = {
     if (post.state !== 'joined' && post.state !== 'left') throw new Refusal('state is joined or left', 400)
     const name = optText(post.name, "the supersession's name", 80)
     return { seq: emit(tx, roomId, room, now, { type: 'session', by: member.id, state: post.state, name, post, sig }) }
+  },
+
+  /**
+   * The chief hands the room on to another active member (supersuit-dev#2756). Only the chief may: a room of
+   * three or more needs one Pluma that keeps the plan and names whose move it is, and a lead nobody gave up
+   * is not a lead. A retired chief's room falls to the earliest member left, who may hand it on in turn.
+   */
+  async chief(tx, { ctx, roomId, room, member, post, sig, now }) {
+    const to = String(post.to ?? '')
+    const target = to ? await tx.get(`rooms/${roomId}/members/${to}`) : null
+    if (!isAgentMember(target) || target!.retired) throw new Refusal('that member is not in this room', 400)
+    const current = chiefAmong(room, await ctx.store.list(`rooms/${roomId}/members`))
+    if (current !== member.id) throw new Refusal('only the chief of this room hands it on', 403)
+    if (to === member.id) throw new Refusal('you are already the chief', 400)
+    tx.update(`rooms/${roomId}`, { chief: to })
+    return { seq: emit(tx, roomId, room, now, { type: 'chief.changed', by: member.id, from: member.id, to, post, sig }) }
   },
 
   /** Any member closes the room (v0.4): the end of the room, not of one tether. The text stays, so its readers can still read it. */
@@ -1133,7 +1163,7 @@ export async function startTether(ctx: Ctx, entry: Record<string, unknown>) {
     if (!person) tx.set(`people/${key}`, { name: personName, emailDigests: [], handle })
     else if (person.name !== personName) tx.update(`people/${key}`, { name: personName })
     tx.set(nonceRef, { at: now })
-    tx.set(`rooms/${roomId}`, { name, state: 'open', tether: true, createdBy: key, createdAt: now, seq: 2 })
+    tx.set(`rooms/${roomId}`, { name, state: 'open', tether: true, createdBy: key, createdAt: now, seq: 2, chief: memberId })
     tx.set(`rooms/${roomId}/events/${pad(1)}`, { seq: 1, type: 'room.created', by: 'host', at: now, name })
     tx.set(`rooms/${roomId}/events/${pad(2)}`, { seq: 2, type: 'member.joined', by: memberId, member: memberId, name: memberName, phrase, at: now })
     tx.set(`memberKeys/${memberId}`, { roomId, publicKey: p.publicKey })

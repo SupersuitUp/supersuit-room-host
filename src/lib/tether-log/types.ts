@@ -13,7 +13,7 @@ export type TetherEvent = { seq: number; type: string; by: string; at: number; [
 export type TetherContextItem = { name: string; why: string; retired?: boolean }
 
 export type TetherInput = {
-  room: { id: string; name: string; state: string; createdAt: number; closedAt?: number }
+  room: { id: string; name: string; state: string; createdAt: number; closedAt?: number; chief?: string }
   members: TetherMember[]
   objectives: TetherObjective[]
   drafts?: TetherDraft[]
@@ -50,4 +50,6 @@ export type TetherLogModel = {
   left: SideCount; right: SideCount | null; handoffs: number
   entries: Entry[]; conversation: ConversationLine[]; library: TetherContextItem[]; signatures: Signatures
   sittings: Sitting[]
+  /** Who leads, in a room of three or more (supersuit-dev#2756): the chief's Pluma and the person it answers to. Null otherwise. */
+  chief: { name: string; answersTo: string } | null
 }
