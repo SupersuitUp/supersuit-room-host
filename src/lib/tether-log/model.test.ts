@@ -94,3 +94,15 @@ describe('sittings', () => {
     expect(tetherLog(again).sittings.filter((x) => x.memberId === 'a-ben').map((x) => [x.name, x.toSeq])).toEqual([['Watering days', 16], ['Later', null]])
   })
 })
+
+describe('tetherLog, in a room of three or more (supersuit-dev#2756)', () => {
+  const cara = { id: 'a-cara', name: "Cara's Pluma", answersTo: 'cara', answersToName: 'Cara' }
+  it('names who leads, from the chief the host gives', () => {
+    const three = tetherLog({ ...S, room: { ...S.room, chief: 'a-cara' }, members: [...S.members, cara] })
+    expect(three.chief).toEqual({ name: "Cara's Pluma", answersTo: 'Cara' })
+    expect(three.people).toEqual(['Ada', 'Ben', 'Cara'])
+  })
+  it('names no lead between two', () => {
+    expect(tetherLog({ ...S, room: { ...S.room, chief: S.members[0].id } }).chief).toBeNull()
+  })
+})

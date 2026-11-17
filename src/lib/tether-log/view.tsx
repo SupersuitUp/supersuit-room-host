@@ -203,7 +203,7 @@ export function TetherLogView({ model: m, mode, checkedBy, aboutHref, notice, ho
             {/* A shared page keeps the bar to the name; its lead sentence defines it. */}
             {/* The room is the place; a tether is temporary. A shared page keeps the bar to the word. */}
             <div className="tl-bar"><b>{mode === 'shared' ? TERMS.room.label : say([{ term: 'room' }], w)}</b><span suppressHydrationWarning>{dayKey(m.from) === dayKey(m.to) ? dayLabel(m.from) : `${dayLabel(m.from)} to ${dayLabel(m.to)}`}</span></div>
-            {m.right && <p className="tl-done">{say(COPY.whatIs, w)}{m.people.join(' and ')}.</p>}
+            {m.right && <p className="tl-done">{say(COPY.whatIs, w)}{andList(m.people)}.</p>}
             {mode === 'shared' && <p className="tl-done">{say(COPY.sharedLead, w)} {aboutHref && <><a href={aboutHref}>{say(COPY.sharedAbout, w)}</a>.</>}</p>}
             <p className="tl-done tl-count">{m.sittings.length} {say([{ term: 'tetheredSupersession', plural: m.sittings.length !== 1, lower: true }], w)}</p>
             <h1 className="tl-intent">{m.name}</h1>
@@ -212,6 +212,7 @@ export function TetherLogView({ model: m, mode, checkedBy, aboutHref, notice, ho
             <div className="tl-stands">
               <div className="tl-state">{m.standing.state === 'Waiting' && <span className="tl-gem" />}{m.standing.state}<When at={m.standing.at} now={now} stack right /></div>
               <p>{m.standing.line}</p>
+              {m.chief && <p className="tl-chief"><b>Led by</b> {m.chief.name}, for {m.chief.answersTo}</p>}
               {mode === 'member' && m.right && <p suppressHydrationWarning>{m.left.name}: {m.left.lastSeenAt ? `last seen ${rel(m.left.lastSeenAt, now)}` : 'not seen yet'}. {m.right.name}: {m.right.lastSeenAt ? `last seen ${rel(m.right.lastSeenAt, now)}` : 'not seen yet'}.</p>}
             </div>
             {notice}
@@ -267,3 +268,6 @@ export function TetherLogView({ model: m, mode, checkedBy, aboutHref, notice, ho
     </div>
   )
 }
+
+/** "Ada", "Ada and Ben", "Ada, Ben and Cara". */
+export const andList = (xs: string[]) => (xs.length < 3 ? xs.join(' and ') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`)

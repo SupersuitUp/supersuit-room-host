@@ -110,7 +110,10 @@ export function tetherLog(input: TetherInput): TetherLogModel {
   const count = (s: Side) => entries.filter((e) => e.side === s).length
   const sideCount = (m: TetherMember, s: Side) => ({ name: m.name, answersTo: firstName(m), count: count(s), lastSeenAt: m.lastSeenAt })
   const active = members.filter((m) => !m.retired)
+  // Two Plumas need no lead named; three or more do, and the host names one on every read.
+  const chiefMember = active.length >= 3 && room.chief ? memberOf(room.chief) : undefined
   return {
+    chief: chiefMember ? { name: chiefMember.name, answersTo: firstName(chiefMember) } : null,
     name: room.name, intent: objectives[0]?.title ?? room.name, done: objectives[0]?.done ?? '',
     people: active.map(firstName), from: room.createdAt, to: lastAt,
     standing, settled, open, story,
