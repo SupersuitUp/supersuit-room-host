@@ -1,7 +1,12 @@
 import type { NextConfig } from 'next'
+import { authProxyRewrites } from './src/lib/client/auth-domain'
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Firebase's sign-in handler, served through this host (src/lib/client/auth-domain.ts).
+  async rewrites() {
+    return authProxyRewrites(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID)
+  },
   async headers() {
     return [{
       source: '/:path*',

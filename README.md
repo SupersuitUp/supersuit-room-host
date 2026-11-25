@@ -27,7 +27,11 @@ and whatever makes a copy its own lives in `tailor/`.
 ## Run your own
 
 1. Fork this repository. Use a Firebase project with Google sign-in on (a new one, or one you already
-   run), and add your host's domain to Authentication's authorized domains.
+   run), and add your host's domain to Authentication's authorized domains. Sign-in runs through your
+   own host, so Google names it: put your domain in `OWN_AUTH_HOSTS` in
+   `src/lib/client/auth-domain.ts`, and add `https://<your domain>/__/auth/handler` under Authorized
+   redirect URIs on the project's OAuth web client (Google Cloud console, APIs and Services,
+   Credentials) before you deploy.
 2. Give the rooms their own Firestore database, named `rooms`, so they never share data with anything
    else in the project, and lock it to the server with the rules in `firestore.rules`:
 
