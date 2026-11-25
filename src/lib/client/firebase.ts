@@ -1,11 +1,13 @@
 'use client'
 import { initializeApp, getApps, getApp } from 'firebase/app'
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth'
+import { authDomainFor } from './auth-domain'
 
 // The host's public web config, from its own environment. Nothing here is a secret.
 const config = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  // Our own host on production, so Google's chooser names the app (./auth-domain.ts).
+  authDomain: authDomainFor(typeof window === 'undefined' ? undefined : window.location.host, process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN),
   projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 }
